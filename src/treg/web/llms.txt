@@ -85,7 +85,8 @@ answer was lost on the way back to you. Send the SAME key when you repeat that c
       -H "X-Treg-Token: $TREG_TOKEN" -H "Idempotency-Key: 4f9c1b2e"
 
 treg returns the stored answer, does not call the provider again, and charges nothing. The reply
-carries `X-Treg-Idempotent-Replay: true` and `X-Treg-Cost-Micro` set to what the original cost.
+carries `X-Treg-Idempotent-Replay: true` and `X-Treg-Cost-Micro` set to what the original cost
+(for a generation task: what it reserved; the settled figure is in `treg audit` / `GET /calls`).
 
 Use a NEW key, or none, for genuinely new work — even with identical parameters. Repeating a search
 to see what changed is a new call, not a retry, and reusing the key would hand you yesterday's

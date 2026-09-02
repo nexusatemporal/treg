@@ -767,7 +767,11 @@ OAuth grants and catalog-only calls are also refused.
 
 `/call/` gained one thing for this: a metered response now carries `X-Treg-Cost-Micro`, so a caller
 can report what it spent instead of diffing the balance. Absent on an unmetered call — a team's own
-key is not ours to bill, and `0` would read as "free".
+key is not ours to bill, and `0` would read as "free". On an **async submission** (a deferred
+generation task) the header is the **reserve**, not the final charge: the task settles later at
+the table row or the provider's reported usage, or refunds in full on failure; `GET /calls` and
+`/calls/{ref}` carry the settled figure under `async_task`, and an idempotent replay repeats the
+reserve. The CLI prints it as "generation reservation".
 
 ## `Idempotency-Key` on `/call/`
 
