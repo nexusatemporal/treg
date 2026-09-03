@@ -23,6 +23,7 @@ sources:
   - src/treg/domain/referrals.py
   - src/treg/audit.py
   - src/treg/analytics.py
+  - src/treg/bootstrap_handlers.py
   - src/treg/ratestore.py
   - src/treg/application/auth.py
   - tests/test_postgres_reset.py
@@ -311,12 +312,14 @@ payment); it queues up to `_MAX_PENDING` events (drop-newest past the bound) and
 micro-batches them (`_BATCH_MAX` per POST, at most every `_FLUSH_INTERVAL_S`) via a per-flush httpx
 client — no semaphore, because HTTP to PostHog never touches the DB pool. **Empty `posthog_key` = the
 module is off** (self-hosters and the test suite send nothing). `$groups: {team: org_slug}` mirrors the
-browser's `posthog.group('team', slug)` and `distinct_id` is the user email, so server events join the
-same PostHog person/group the SPA identifies. Emitters: `call_tool`'s `_audit` funnel (`tool_called`,
-with the catalog `provider` as vendor or the upstream host for own tools; the field list is in
-[proxy-model](proxy-model.md)), `billing_topup`
-(`topup_started`), and `billing._credit` (`topup_completed`, gated on `fresh`). Drained in the lifespan
-`finally` after `audit.drain()`. The engine adds Postgres pool
+browser's `posthog.group('team', slug)`. Attributed product events use the caller's email and team group,
+so they join the same PostHog person/group the SPA identifies. A pre-identity `call_intake_failed` event
+instead uses the fixed `treg-server` identity and no team because authentication could not obtain a DB
+connection. Emitters:
+`call_tool`'s `_audit` funnel (`tool_called`, with the catalog `provider` as vendor or the upstream host
+for own tools; the field list is in [proxy-model](proxy-model.md)), `bootstrap_handlers._pool_saturated`
+(`call_intake_failed`), `billing_topup` (`topup_started`), and `billing._credit` (`topup_completed`,
+gated on `fresh`). Drained in the lifespan `finally` after `audit.drain()`. The engine adds Postgres pool
 hygiene (`pool_pre_ping`/`pool_recycle`/sizing) for non-SQLite URLs, and `verify_db` refuses to start with
 no `TREG_SECRET_KEY` on a real DB (an ephemeral key would lose every stored secret on restart).
 

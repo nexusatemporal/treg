@@ -35,6 +35,7 @@ from ..application.call.intake import (
 )
 from ..application.call.types import CallerSnapshot, CallFailure, CallInput, UpstreamResponse
 from ..caller_metadata import _client_of
+from ..call_surface import split_call_path
 from ..config import get_settings
 from ..domain.governance import access as access_policy
 from ..domain.governance import publicdemo as publicdemo_policy
@@ -138,6 +139,14 @@ def _may_have_body(request: Request) -> bool:
     return may_have_body(tuple(request.headers.raw))
 
 
+def _call_rest(request: Request, context: object | None) -> str:
+    rest = getattr(getattr(context, "input", None), "raw_rest", None)
+    if rest is not None:
+        return rest
+    call_path = split_call_path(request.url.path)
+    return call_path[1] if call_path else request.url.path.lstrip("/")
+
+
 def _capture_exceptional_call(
     request: Request, *, call_ref: str, status_code: int, failure_kind: str,
 ) -> None:
@@ -145,9 +154,7 @@ def _capture_exceptional_call(
     context = getattr(request.state, "call_context", None)
     marketplace = getattr(context, "marketplace", None)
     target = getattr(context, "target", None)
-    rest = getattr(getattr(context, "input", None), "raw_rest", None)
-    if rest is None:
-        rest = request.url.path[len("/call/"):]
+    rest = _call_rest(request, context)
     tool_name = (
         getattr(marketplace, "endpoint_id", None)
         or getattr(getattr(target, "tool", None), "name", None)
@@ -190,7 +197,7 @@ async def _stamp_call_exit(
     *,
     failure_kind: str | None = None,
 ) -> None:
-    """Give one `/call/` exit the three things every other exit gets: the id that joins the response
+    """Give one call-surface exit the three things every other exit gets: the id that joins the response
     to the audit row, the row itself, and the release of any idempotency label the request took.
 
     Shared by the two handlers that answer a call without reaching `call_tool`'s own bookkeeping.
@@ -204,9 +211,7 @@ async def _stamp_call_exit(
     if not getattr(request.state, "call_audited", False):
         org_id, email = getattr(request.state, "call_identity", (None, ""))
         context = getattr(request.state, "call_context", None)
-        rest = getattr(getattr(context, "input", None), "raw_rest", None)
-        if rest is None:
-            rest = request.url.path[len("/call/"):]
+        rest = _call_rest(request, context)
         audit.record_call(
             org_id=org_id, user_email=email, tool_name=rest.split("/", 1)[0] or "—",
             method=request.method, path=request.url.path, status_code=status_code,

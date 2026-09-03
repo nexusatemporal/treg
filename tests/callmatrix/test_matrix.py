@@ -1013,3 +1013,66 @@ async def test_h3_pool_saturation_before_identity_uses_an_intake_event(
     assert "$groups" not in event["properties"]
     assert "own_tool" not in event["properties"]
     assert "provider" not in event["properties"]
+
+
+async def test_h4_catalog_saturation_releases_idempotency_claim(
+    matrix_clients: AsyncClient, fake_provider: FakeProvider, platform_on, monkeypatch, posthog_events,
+) -> None:
+    """The catalog-only call surface has the same failure and retry contract as `/call/`."""
+    original_reserve = call_service._platform_reserve
+    attempts = 0
+
+    async def _fail_once(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PoolTimeoutError(
+                "QueuePool limit of size 5 overflow 10 reached, connection timed out")
+        return await original_reserve(*args, **kwargs)
+
+    monkeypatch.setattr(call_service, "_platform_reserve", _fail_once)
+    headers = {"Idempotency-Key": "catalog-saturation-retry"}
+
+    first = await matrix_clients.get(f"/catalog/call/{EP}?aweme_id=7", headers=headers)
+    second = await matrix_clients.get(f"/catalog/call/{EP}?aweme_id=7", headers=headers)
+    await audit.drain()
+
+    assert first.status_code == 503
+    assert first.json()["treg_saturated"] is True
+    assert first.headers.get("X-Treg-Call-Id")
+    assert second.status_code == 200, second.text
+    assert len(fake_provider.hits) == 1
+    rows = (await matrix_clients.get("/calls")).json()
+    failed = next(row for row in rows if row["status_code"] == 503)
+    assert failed["tool_name"] == EP
+    assert failed["call_ref"] == first.headers["X-Treg-Call-Id"]
+    (event,) = [
+        event for event in await posthog_events()
+        if event["properties"].get("failure_kind") == "db_pool"
+    ]
+    assert event["properties"]["provider"] == "tikhub"
+    assert event["properties"]["endpoint_id"] == EP
+
+
+async def test_h5_catalog_saturation_before_identity_uses_catalog_intake_event(
+    matrix_clients: AsyncClient, monkeypatch, posthog_events,
+) -> None:
+    """Pre-identity saturation stays unattributed while retaining its ingress surface."""
+    original_lookup = identity_access._membership_by_token
+
+    async def _no_auth_slot(*args, **kwargs):
+        raise PoolTimeoutError("QueuePool limit of size 5 overflow 10 reached, connection timed out")
+
+    monkeypatch.setattr(identity_access, "_membership_by_token", _no_auth_slot)
+    response = await matrix_clients.get(f"/catalog/call/{EP}?aweme_id=7")
+    monkeypatch.setattr(identity_access, "_membership_by_token", original_lookup)
+
+    assert response.status_code == 503
+    assert response.headers.get("X-Treg-Call-Id")
+    assert await posthog_events() == []
+    (event,) = await posthog_events("call_intake_failed")
+    assert event["distinct_id"] == "treg-server"
+    assert event["properties"]["surface"] == "catalog_call"
+    assert "$groups" not in event["properties"]
+    assert "own_tool" not in event["properties"]
+    assert "provider" not in event["properties"]
