@@ -522,22 +522,18 @@ async def create_portal_session(db: AsyncSession, org: Org, *, return_base: str 
 
 
 # ---- payment history ---------------------------------------------------------------------------
-async def list_payments(db: AsyncSession, org: Org, *, limit: int = 24) -> dict:
-    """The org's completed top-ups, newest first, each with a link to its invoice or receipt.
+# Split in two so the DB session (see `get_payment_history`) can close before the Stripe round trip in
+# `_payment_documents` — a pooled connection must never sit open across an upstream call, the same
+# lesson the 2026-08-24 `/call/` deadlock taught (`infra/db.py`).
+async def _load_payment_rows(
+    db: AsyncSession, org: Org, *, limit: int = 24,
+) -> tuple[list[CreditBlock], set[str], dict[str, int]]:
+    """The org's completed top-ups, newest first: DB rows, their auto-topup flags, bonus amounts.
 
     The ROWS come from our own `CreditBlock` table, not from Stripe. That table is what the balance is
     computed from, so a history built on it can never show a payment the balance disagrees with — and
-    it needs no network call to render amounts and dates.
-
-    Stripe is asked only for the DOCUMENTS, in two list calls rather than two per row: charges (which
-    carry `receipt_url` and point at the invoice) and invoices (which carry the PDF). A failure there
-    degrades to rows without links — a Stripe hiccup should cost the payer their download button, not
-    their payment history. `stripe_ok` says which happened so the UI can tell them.
-
-    Both Stripe windows cap at 100 payments, so a very old top-up on a heavily-used account can come
-    back link-less; the portal (`create_portal_session`) is the unbounded archive.
-
-    Read-only: nothing here moves money or writes to the ledger.
+    it needs no network call to render amounts and dates. Read-only: nothing here moves money or
+    writes to the ledger.
     """
     blocks = (await db.execute(
         select(CreditBlock)
@@ -572,7 +568,14 @@ async def list_payments(db: AsyncSession, org: Org, *, limit: int = 24) -> dict:
             if isinstance(meta, dict) and meta.get("source") == "topup_bonus" and meta.get("payment_intent"):
                 bonus_by_pi[str(meta["payment_intent"])] = bonus_by_pi.get(str(meta["payment_intent"]), 0) + int(amt)
 
-    docs, stripe_ok = await _payment_documents(org, len(blocks))
+    return list(blocks), auto, bonus_by_pi
+
+
+def _assemble_payments(
+    blocks: list[CreditBlock], auto: set[str], bonus_by_pi: dict[str, int],
+    docs: dict[str, dict], stripe_ok: bool,
+) -> dict:
+    """Join DB rows with Stripe documents. Pure — no I/O, safe to call after the session is closed."""
     items = []
     for b in blocks:
         d = docs.get(b.stripe_payment_intent or "", {})
@@ -594,8 +597,10 @@ async def list_payments(db: AsyncSession, org: Org, *, limit: int = 24) -> dict:
 async def _payment_documents(org: Org, wanted: int) -> tuple[dict[str, dict], bool]:
     """`{payment_intent_id: {receipt_url, number, invoice_pdf, hosted_invoice_url}}` for one customer.
 
-    Two list calls, joined in memory through the charge's `invoice` field. Returns `({}, False)` on
-    any Stripe failure — the caller renders amounts without links rather than a 500.
+    Two list calls (charges, invoices) rather than two per row, joined in memory through the charge's
+    `invoice` field. Both windows cap at 100 payments, so a very old top-up on a heavily-used account
+    can come back link-less; the portal (`create_portal_session`) is the unbounded archive. Returns
+    `({}, False)` on any Stripe failure — the caller renders amounts without links rather than a 500.
     """
     if not (org.stripe_customer_id and wanted and configured()):
         return {}, bool(configured())
@@ -1303,9 +1308,13 @@ async def configure_autotopup(
 
 
 async def get_payment_history(org_id: int, *, limit: int) -> dict:
+    # The DB session closes before `_payment_documents` calls Stripe below — a pooled connection must
+    # never sit open across an upstream round trip (the 2026-08-24 `/call/` deadlock, `infra/db.py`).
     async with _db.session_maker() as db:
         org = await _journey_org(db, org_id)
-        return await list_payments(db, org, limit=limit)
+        blocks, auto, bonus_by_pi = await _load_payment_rows(db, org, limit=limit)
+    docs, stripe_ok = await _payment_documents(org, len(blocks))
+    return _assemble_payments(blocks, auto, bonus_by_pi, docs, stripe_ok)
 
 
 async def open_billing_portal(org_id: int, *, return_base: str) -> dict:
