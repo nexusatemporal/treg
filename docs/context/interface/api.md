@@ -585,6 +585,15 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   (`status`, `task_id`, `reserved_micro`, `settled_micro`, `completed_at`, `error`, `result_url`,
   `fetch_command`, `ttl_note`) while `_async_charged` rewrites the charge to what actually hit the
   balance - `null` while pending, the settled figure (0 after a refund) at a terminal state.
+  Each row also carries `has_result` — true when the archive holds this call's answer — and
+  `get_call_result` (`GET /calls/{id}/result`, member, org-scoped by the row's `org_id`) returns
+  it: the vendor-facing request shape BEFORE credential injection (`ArchiveKey.req_*`) and the
+  stored answer (`ArchiveSnapshot`: status, media type, size, fetch time, `body_text`), resolved
+  through the row's `archive_key_hash` + `archive_content_hash` by `archive.resolve_result`. Only
+  a metered platform 2xx call ever has one; every other row answers `stored: false` with a `note`
+  naming the case (own-key/own-tool never stored · failed · recording off · expired · hash-only
+  because the licence or size cap kept the hash and not the bytes). The failure-evidence columns
+  are still never read here (see [archive](../architecture/archive.md)).
 - **OAuth connect + the provider marketplace:** `oauth_start` (`POST /oauth/start`) creates a
   `PendingOAuth` and returns `consent_url` + `state` + `redirect_uri` + registry-owned
   `connect_guidance`; `oauth_callback`
@@ -821,6 +830,8 @@ if returning the hold itself fails, the money comes back when the hold is reaped
 |---|---|
 | `GET /calls?days=&before_id=&limit=` | this team's calls, windowed and pageable. Analytics — **not** an invoice source |
 | `GET /calls/{call_ref}` | one call by its `X-Treg-Call-Id`, plus the ledger entries for it and its `async_task` view when it was a metered generation |
+| `GET /calls/{id}/result` | what one call asked and what came back — the archive's copy; metered platform 2xx only, `stored: false` + `note` otherwise |
+| `GET /calls/{call_ref}` | one call by its `X-Treg-Call-Id`, plus the ledger entries for it |
 | `GET /orgs/{id}/usage/by-tag?key=&days=` | per-value spend for one tag key. **Money from the ledger**; admin+ |
 | `GET/PUT/DELETE /orgs/{id}/budgets[/{dim}/{val}]` | per-tag limits and blocking; admin+ |
 | `GET/PATCH /orgs/{id}/settings` | the team's daily spend cap, budget dimensions and primary dimension |

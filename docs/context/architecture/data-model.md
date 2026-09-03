@@ -13,7 +13,8 @@ sources:
   - src/treg/alembic/versions/0007_overflow_spend.py
   - src/treg/alembic/versions/0008_org_platform_overflow_disabled.py
   - src/treg/alembic/versions/0009_callrecord_hit.py
-  - src/treg/alembic/versions/0011_async_task_record.py
+  - src/treg/alembic/versions/0012_async_task_record.py
+  - src/treg/alembic/versions/0011_callrecord_archive_link.py
   - src/treg/maintenance.py
   - src/treg/web/sitetrack.js
   - src/treg/models.py
@@ -38,7 +39,7 @@ related:
 `AsyncTaskRecord` is one deferred metered submission keyed by the original `call_id`: org,
 provider, endpoint, extracted task id, optional validated dynamic poll URL, reserved micro-USD,
 frozen descriptor/basis/request evidence, scheduling attempts, status and completion/error fields.
-Migration `0011` is expand-only. It ships with the behavior because old code ignores the new table
+Migration `0012` is expand-only. It ships with the behavior because old code ignores the new table
 while new code cannot safely retain an asynchronous hold without it.
 
 ## OAuth authorization method identity
@@ -145,6 +146,11 @@ SQLModel tables in `src/treg/models.py`. Kept minimal on purpose. Org multi-tena
   the reserve refusal, where `detail` names **which** cap was hit, since every 429 collapses to
   `refused_by='cap'` and that one value spans member, tag, org, platform and trial limits.
   Never written for a success; `/calls` defers and omits both fields, keeping them admin-only.
+  Separate from that evidence, `archive_key_hash` + `archive_content_hash` (migration 0011, the
+  last two columns, nullable, no index) name the archived answer a metered platform 2xx call
+  received — `ArchiveKey.key_hash` and `ArchiveSnapshot.content_hash` — set by the call service
+  from what `archive.record()`/`archive.lookup()` return; the join behind the team-facing
+  `GET /calls/{id}/result` (see [archive](archive.md)). NULL on every other row.
   Redaction is exact-match-first for every injected credential: platform settings and decrypted org
   Secrets. OAuth/secret-file JSON masks the raw blob, injected field, `Bearer` form, and string values
   under the sensitive-key allowlist (including the binding's `secret_field`), while diagnosis fields

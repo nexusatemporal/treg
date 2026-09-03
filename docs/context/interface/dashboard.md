@@ -323,6 +323,16 @@ Server side (`domain.identity.access`): `require_identity` (who, from token OR s
   provider's time-limited URL (tooltip from `taskArtifactTitle` carries the `ttl_note` and when it
   was generated) or a `result via CLI` chip whose tooltip is the retrieval command for fetch-mode
   routes. treg never proxies or stores the media itself.
+  The feed shows **successes only by default** (`actOkOnly`, `activityShown` filters on `ok`);
+  a "Show all (N)" / "Successes only" button toggles failed and refused rows in, and the empty
+  state offers the same switch when every recent call failed.
+  A call row is clickable (`openCall` → `callView`, a right-side drawer in the `epTry` pattern)
+  and loads `GET /calls/{id}/result`: the request line (method + vendor URL before injection),
+  the response (status · media type · size · fetch time, JSON pretty-printed by `pretty`, a Copy
+  button via `toClipboard`, rendered text capped at 256 KB with a "show full" link), or the
+  endpoint's `note` when nothing is on file. Rows whose `has_result` is true show a small
+  "result ›" affordance next to the status badge; own-key, own-tool and failed calls open the
+  same drawer and read the note. Only metered platform 2xx calls ever have a stored answer.
 - **Admin** — nav auto-appears iff the caller is `is_superadmin` (read from `/auth/me` on boot — **not**
   by probing `/admin/stats`, which would 403 + log a console error on every load for normal users); `loadAdmin` fetches `stats` + `orgs` + `users` only when you open the panel. Shows `stats` + `orgs` + `users`, each
   with **mutations** (`_adm` helper): `admGrant`/`admSuspendUser`/`admDeleteUser`,
