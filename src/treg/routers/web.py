@@ -223,6 +223,7 @@ def _page(title: str, description: str, path: str, body: str, ld: list[dict],
   </div>
 </footer>
 <script src="/adtrack.js"></script>
+<script src="/gtag.js"></script>
 </body>
 </html>""", headers={"Cache-Control": "public, max-age=600"})
 
@@ -3006,6 +3007,21 @@ async def adtrack_js():
         raise HTTPException(status_code=404, detail="adtrack.js not bundled")
     # no-cache, same reasoning as tutorial.js: served as a bare `<script src="/adtrack.js">` with no
     # version query, so without this header a browser would keep an ad-window-stale copy after a fix.
+    return FileResponse(f, media_type="application/javascript", headers=headers)
+
+
+@app.get("/gtag.js", include_in_schema=False)
+async def gtag_js():
+    """Google Ads conversion tracking via gtag.js. Loads the base tag (AW-18392771132) on every
+    page; the signup conversion (AW-18392771132/0usqCIeQrO0cELzUrcJE) fires from the dashboard
+    on first team creation for a new user. Like adtrack.js, returns empty for unconfigured or
+    self-hosted deployments that don't want external Google requests."""
+    headers = {"Cache-Control": "no-cache"}
+    if not adsconv.enabled():
+        return Response(content="", media_type="application/javascript", headers=headers)
+    f = _WEB_DIR / "gtag.js"
+    if not f.exists():
+        raise HTTPException(status_code=404, detail="gtag.js not bundled")
     return FileResponse(f, media_type="application/javascript", headers=headers)
 
 
