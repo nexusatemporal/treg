@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlmodel import select
 
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
+from treg.api import app
 from treg.application.call import service as call_service
-from treg.routers import call as call_routes
 from treg import audit
 from treg.domain import money as ledger
 from treg.infra.db import session_maker
@@ -899,7 +899,7 @@ async def test_g1_ten_concurrent_calls_compete_for_three_call_balance(
 
 
 async def test_h1_saturation_503_still_carries_a_call_id_and_a_row(
-    matrix_clients: AsyncClient, fake_provider: FakeProvider, monkeypatch,
+    matrix_clients: AsyncClient, fake_provider: FakeProvider, monkeypatch, posthog_events,
 ) -> None:
     """A burst that exhausts the DB pool is the one failure a caller cannot cause and cannot avoid
     (#181). It is answered by `_pool_saturated`, not by the refusal handler, so it needs its own
@@ -930,3 +930,47 @@ async def test_h1_saturation_503_still_carries_a_call_id_and_a_row(
     assert row["tool_name"] == "echo"
     # A 5xx is treg failing, not treg refusing — `_refusal_kind` maps it to None.
     assert row["refused_by"] is None
+    (event,) = await posthog_events()
+    assert event["distinct_id"] == "tim@superdesign.dev"
+    expected = {
+        "status_code": 503,
+        "outcome": "gateway_failed",
+        "failure_kind": "db_pool",
+        "call_ref": call_id,
+    }
+    assert {key: event["properties"][key] for key in expected} == expected
+
+
+async def test_h2_unexpected_500_is_reported_once_as_treg_owned(
+    matrix_clients: AsyncClient, fake_provider: FakeProvider, monkeypatch, posthog_events,
+) -> None:
+    """A bug inside the call pipeline is still one attempted call in the product funnel. Exercise
+    the real HTTP boundary with server exceptions disabled, exactly as a remote caller sees it."""
+    await _register_echo(matrix_clients)
+
+    async def _crash(*args, **kwargs):
+        raise RuntimeError("unexpected call-path bug")
+
+    monkeypatch.setattr(call_service, "_resolve_call", _crash)
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://registry",
+        headers={"X-Treg-Token": matrix_clients.headers["X-Treg-Token"]},
+    ) as remote_client:
+        response = await remote_client.get("/call/echo/ping")
+
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
+    assert len(fake_provider.hits) == 0
+    await audit.drain()
+    rows = (await matrix_clients.get("/calls")).json()
+    row = next(row for row in rows if row["status_code"] == 500)
+    (event,) = await posthog_events()
+    assert event["distinct_id"] == "tim@superdesign.dev"
+    expected = {
+        "status_code": 500,
+        "outcome": "gateway_failed",
+        "failure_kind": "unexpected_exception",
+        "call_ref": row["call_ref"],
+    }
+    assert {key: event["properties"][key] for key in expected} == expected

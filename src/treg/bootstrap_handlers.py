@@ -14,7 +14,7 @@ from . import analytics
 
 
 # create_app supplies the call-specific compensation callback before registering these adapters.
-_stamp_call_exit: Any
+_stamp_call_exit: Any = None
 
 
 async def _pool_saturated(request: Request, exc: PoolTimeoutError) -> JSONResponse:
@@ -34,7 +34,7 @@ async def _pool_saturated(request: Request, exc: PoolTimeoutError) -> JSONRespon
     # the typed `treg_saturated` flag above is this exit's signal, and the header is documented as
     # the HTTPException handler's (interface/api.md).
     if request.url.path.startswith("/call/"):
-        await _stamp_call_exit(request, resp, 503)
+        await _stamp_call_exit(request, resp, 503, failure_kind="db_pool")
     return resp
 
 async def _mark_treg_own_errors(request: Request, exc: StarletteHTTPException):

@@ -670,7 +670,9 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   `503 {"treg_saturated": true}` + `Retry-After: 2` (`_pool_saturated`, the handler for
   `sqlalchemy.exc.TimeoutError`) rather than a 30 s wait and an anonymous 500. The adapter also calls
   `analytics.capture_fault(component="db_pool")`: saturation is a handled, typed response for the caller
-  but remains an infrastructure fault for PostHog alerting. A **platform binding** carries no `secret_id`
+  but remains an infrastructure fault for PostHog alerting. It also emits one `tool_called` event with
+  `outcome=gateway_failed` and `failure_kind=db_pool`; an unexpected exception inside `call_tool`
+  emits the same outcome with `failure_kind=unexpected_exception`. A **platform binding** carries no `secret_id`
   (its value comes from settings at relay time), so secret-loading now skips `secret_id is None`. Detail
   in [proxy-model](../architecture/proxy-model.md).
   `call_catalog_endpoint` (`* /catalog/call/{rest:path}`, hidden from public OpenAPI) is the narrower
@@ -806,7 +808,8 @@ Every relayed response carries **`X-Treg-Call-Id`**, and so does every refusal t
 relay, plus the saturation 503 (`_stamp_call_exit` mints it for the exits that never reach
 `call_tool`'s own bookkeeping). The same id is written to the audit row, making it the join key for
 your own records. The one exit with no id is an **unexpected fault**: a bug that escapes `call_tool`
-is answered by Starlette itself as a bare 500 and leaves no row either.
+is answered by Starlette itself as a bare 500. The response still has no id because Starlette owns it,
+but treg now records the row and one matching `tool_called` event before re-raising the exception.
 
 Metered responses also carry `X-Treg-Cost-Micro`; a reserved call that fails before a provider answer
 carries an explicit `0`. That `0` is what the call ends up costing, but the **balance can lag it**:
