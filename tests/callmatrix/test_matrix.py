@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+import logging
 
 from httpx import ASGITransport, AsyncClient
 from sqlmodel import select
@@ -13,6 +14,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from treg.api import app
 from treg.application.call import service as call_service
 from treg import audit
+from treg.domain.identity import access as identity_access
 from treg.domain import money as ledger
 from treg.infra.db import session_maker
 from treg.domain.money import with_margin
@@ -899,7 +901,7 @@ async def test_g1_ten_concurrent_calls_compete_for_three_call_balance(
 
 
 async def test_h1_saturation_503_still_carries_a_call_id_and_a_row(
-    matrix_clients: AsyncClient, fake_provider: FakeProvider, monkeypatch, posthog_events,
+    matrix_clients: AsyncClient, fake_provider: FakeProvider, monkeypatch, posthog_events, caplog,
 ) -> None:
     """A burst that exhausts the DB pool is the one failure a caller cannot cause and cannot avoid
     (#181). It is answered by `_pool_saturated`, not by the refusal handler, so it needs its own
@@ -914,7 +916,8 @@ async def test_h1_saturation_503_still_carries_a_call_id_and_a_row(
     monkeypatch.setattr(call_service, "_resolve_call", _no_slot)
     before = await snapshot(matrix_clients, fake_provider)
 
-    response = await matrix_clients.get("/call/echo/ping")
+    with caplog.at_level(logging.WARNING, logger="treg.audit"):
+        response = await matrix_clients.get("/call/echo/ping")
     await audit.drain()
 
     assert response.status_code == 503
@@ -937,8 +940,13 @@ async def test_h1_saturation_503_still_carries_a_call_id_and_a_row(
         "outcome": "gateway_failed",
         "failure_kind": "db_pool",
         "call_ref": call_id,
+        "own_tool": None,
+        "provider": None,
+        "endpoint_id": None,
     }
     assert {key: event["properties"][key] for key in expected} == expected
+    assert event["properties"]["$groups"]["team"]
+    assert "dropping unknown CallRecord telemetry keys" not in caplog.text
 
 
 async def test_h2_unexpected_500_is_reported_once_as_treg_owned(
@@ -946,8 +954,6 @@ async def test_h2_unexpected_500_is_reported_once_as_treg_owned(
 ) -> None:
     """A bug inside the call pipeline is still one attempted call in the product funnel. Exercise
     the real HTTP boundary with server exceptions disabled, exactly as a remote caller sees it."""
-    await _register_echo(matrix_clients)
-
     async def _crash(*args, **kwargs):
         raise RuntimeError("unexpected call-path bug")
 
@@ -957,7 +963,7 @@ async def test_h2_unexpected_500_is_reported_once_as_treg_owned(
         base_url="http://registry",
         headers={"X-Treg-Token": matrix_clients.headers["X-Treg-Token"]},
     ) as remote_client:
-        response = await remote_client.get("/call/echo/ping")
+        response = await remote_client.get("/call/tikhub.tiktok.video.comments")
 
     assert response.status_code == 500
     assert response.text == "Internal Server Error"
@@ -972,5 +978,38 @@ async def test_h2_unexpected_500_is_reported_once_as_treg_owned(
         "outcome": "gateway_failed",
         "failure_kind": "unexpected_exception",
         "call_ref": row["call_ref"],
+        "own_tool": None,
+        "provider": None,
+        "endpoint_id": None,
     }
     assert {key: event["properties"][key] for key in expected} == expected
+
+
+async def test_h3_pool_saturation_before_identity_uses_an_intake_event(
+    matrix_clients: AsyncClient, monkeypatch, posthog_events,
+) -> None:
+    """The first database checkout is authentication. If that checkout times out, no caller or
+    target has been resolved, so the attempt must not enter the attributed `tool_called` funnel."""
+    async def _no_auth_slot(*args, **kwargs):
+        raise PoolTimeoutError("QueuePool limit of size 5 overflow 10 reached, connection timed out")
+
+    monkeypatch.setattr(identity_access, "_membership_by_token", _no_auth_slot)
+    response = await matrix_clients.get("/call/tikhub.tiktok.video.comments")
+
+    assert response.status_code == 503
+    assert response.json()["treg_saturated"] is True
+    assert response.headers.get("X-Treg-Call-Id")
+    assert await posthog_events() == []
+    (event,) = await posthog_events("call_intake_failed")
+    assert event["distinct_id"] == "treg-server"
+    expected = {
+        "status_code": 503,
+        "outcome": "gateway_failed",
+        "failure_kind": "db_pool",
+        "phase": "caller_identity",
+        "surface": "call",
+    }
+    assert {key: event["properties"][key] for key in expected} == expected
+    assert "$groups" not in event["properties"]
+    assert "own_tool" not in event["properties"]
+    assert "provider" not in event["properties"]

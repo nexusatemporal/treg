@@ -52,10 +52,12 @@ shared Task before database and HTTP resources disappear.
 
 `bootstrap_handlers.py` owns the app-wide pool-saturation and HTTP-exception adapters. The composition
 root supplies the call-specific `_stamp_call_exit` callback from `routers/call.py` before registration;
-the callback owns call ids, refusal classification, audit fallback, exceptional `tool_called` telemetry,
-and idempotency-label release. The pool adapter reports `failure_kind=db_pool` in that call funnel and
-also sends its infrastructure exception to `analytics.capture_fault` before returning the typed 503;
-normal HTTP refusals remain responses, not server faults.
+the callback owns call ids, refusal classification, audit fallback, exceptional call telemetry, and
+idempotency-label release. After caller identity exists, the pool adapter reports
+`failure_kind=db_pool` in the `tool_called` funnel. A timeout during identity resolution instead emits
+`call_intake_failed`, with no team or target attribution, so it does not change the admitted-call
+population. Both also send the infrastructure exception to `analytics.capture_fault` before returning
+the typed 503; normal HTTP refusals remain responses, not server faults.
 
 `bootstrap_http.py` owns the app-wide middleware implementations. The middleware stack is
 `_BodyDecodeMiddleware` -> `_SecurityHeadersMiddleware` ->

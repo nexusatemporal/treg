@@ -159,10 +159,10 @@ def _capture_exceptional_call(
         tool_name=tool_name,
         status_code=status_code,
         call_ref=call_ref,
-        own_tool=marketplace is None and not getattr(request.state, "catalog_only", False),
+        own_tool=(False if marketplace is not None else True if target is not None else None),
         refused_by=None,
         answered=False,
-    ) | {"failure_kind": failure_kind}
+    ) | {"failure_kind": failure_kind, "provider": None, "endpoint_id": None}
     if marketplace is not None:
         props |= {
             "provider": marketplace.provider,
@@ -211,7 +211,7 @@ async def _stamp_call_exit(
             org_id=org_id, user_email=email, tool_name=rest.split("/", 1)[0] or "—",
             method=request.method, path=request.url.path, status_code=status_code,
             client=_client_of(request), refused_by=_refusal_kind(status_code),
-            telemetry={"call_ref": call_ref, **({"failure_kind": failure_kind} if failure_kind else {})})
+            telemetry={"call_ref": call_ref})
         if failure_kind:
             _capture_exceptional_call(
                 request, call_ref=call_ref, status_code=status_code, failure_kind=failure_kind)

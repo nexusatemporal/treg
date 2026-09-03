@@ -11,10 +11,28 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import analytics
+from .caller_metadata import _client_of
+from .client_identity import _norm_client
 
 
 # create_app supplies the call-specific compensation callback before registering these adapters.
 _stamp_call_exit: Any = None
+
+
+def _capture_call_intake_failure(request: Request) -> None:
+    """Report a call-shaped request that failed before treg could resolve its caller."""
+    user_agent = request.headers.get("user-agent", "")
+    analytics.capture("treg-server", "call_intake_failed", {
+        "status_code": 503,
+        "outcome": "gateway_failed",
+        "failure_kind": "db_pool",
+        "phase": "caller_identity",
+        "surface": "call",
+        "client": _client_of(request),
+        "method": request.method,
+        "user_agent": user_agent[:100],
+        "ua_family": _norm_client(user_agent),
+    })
 
 
 async def _pool_saturated(request: Request, exc: PoolTimeoutError) -> JSONResponse:
@@ -34,7 +52,11 @@ async def _pool_saturated(request: Request, exc: PoolTimeoutError) -> JSONRespon
     # the typed `treg_saturated` flag above is this exit's signal, and the header is documented as
     # the HTTPException handler's (interface/api.md).
     if request.url.path.startswith("/call/"):
-        await _stamp_call_exit(request, resp, 503, failure_kind="db_pool")
+        if hasattr(request.state, "call_identity"):
+            await _stamp_call_exit(request, resp, 503, failure_kind="db_pool")
+        else:
+            _capture_call_intake_failure(request)
+            await _stamp_call_exit(request, resp, 503)
     return resp
 
 async def _mark_treg_own_errors(request: Request, exc: StarletteHTTPException):

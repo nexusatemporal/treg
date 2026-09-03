@@ -171,7 +171,7 @@ def _outcome(status_code: int, refused_by: str | None, *, answered: bool) -> str
 
 
 def _tool_called_props(request: _ApplicationRequest, *, tool_name: str, status_code: int,
-                       call_ref: str, own_tool: bool, refused_by: str | None,
+                       call_ref: str, own_tool: bool | None, refused_by: str | None,
                        answered: bool = True, duration_ms: int | None = None,
                        cached: bool = False, smoothed: str | None = None,
                        hit: bool | None = None, response_bytes: int | None = None) -> dict:
