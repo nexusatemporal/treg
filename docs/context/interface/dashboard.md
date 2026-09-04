@@ -130,7 +130,7 @@ Two are **session** (cookie) paths, one is a token fallback:
 - Either way the dashboard authenticates with the **cookie** (`credentials:'include'`) + picks the org
   with **`X-Treg-Org`**, detected via `/auth/me` on load. Cookie `Secure` only on HTTPS (`_is_https`).
   For copy-paste convenience it also fetches `GET /auth/cli-token` on load into `myToken` — sent WITH
-  the active-org header, so the minted identity token is **team-pinned** (`sess.make(..., org=slug)`,
+  the active-org header, so the minted identity token is **team-pinned** (`sess.make_identity(..., org=slug)`,
   a stateless `org` claim; the endpoint only pins a team the caller is a member of). That is the point:
   the "API key" then works as a **bare bearer** — pasted into an MCP server's `Authorization` header,
   where no `X-Treg-Org` can travel, it still resolves to that team (fixing the "several teams, none
@@ -164,8 +164,10 @@ empty Tools state offers `jumpToTeam()`.
 
 The session cookie is HMAC-signed with `TREG_SESSION_SECRET`/`TREG_SECRET_KEY`, falling back to a
 **random per-process key** when neither is set (never a source-visible constant — that would make
-cookies forgeable for any uid, incl. a superadmin). It also carries a **`tv` (token_version)** claim
-(`sess.make`/`read_claims`); a mismatch against `User.token_version` = revoked, so `POST
+cookies forgeable for any uid, incl. a superadmin). New cookies carry signed `aud=session` and a 7-day
+`exp`; copied API tokens carry `aud=identity` and no `exp`, so neither credential can cross into the
+other path. Both also carry a **`tv` (token_version)** claim; a mismatch against
+`User.token_version` = revoked, so `POST
 /auth/revoke-tokens` can invalidate a user's cookies + CLI tokens without rotating the shared secret. In **token mode** the dashboard carries `org_id`
 on the active org (so `activeOrgId` resolves and org-admin writes work), fetches `me` via `/auth/me`
 (so `isPersonal` + join-by-code work), and persists a newly-created org's returned token so the team is

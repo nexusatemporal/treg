@@ -41,7 +41,6 @@ from ..timeutil import utcnow_naive as _utcnow_naive
 from . import signup
 
 
-CLI_TOKEN_TTL = 30 * 24 * 3600      # identity token lifetime for the CLI
 EMAIL_CODE_TTL = 10 * 60  # seconds a code stays valid
 MAX_OTP_ATTEMPTS = 5  # invalidate a code after this many wrong guesses (brute-force guard)
 OTP_NS = "otp"
@@ -54,7 +53,7 @@ AUTH_CODE_TTL_S = 300   # a code is redeemed within seconds; five minutes is gen
 
 # In-memory handshake state for `treg login` (single-instance; short-lived, fine to lose on restart).
 # Both carry a created-at so abandoned handshakes (unauthenticated, attacker-chosen keys) are swept
-# rather than accumulating forever — the results map holds live 30-day tokens, so it must not leak.
+# rather than accumulating forever — the results map holds live identity tokens, so it must not leak.
 _cli_states: dict[str, tuple[str, datetime]] = {}   # oauth state -> (login_id, created_at)
 _cli_results: dict[str, tuple[dict, datetime]] = {}  # login_id -> (result, created_at) — a completed login
 # login_id -> (pairing_code, attempts_left, created_at). Created by POST /auth/cli/start; the browser must
@@ -258,8 +257,8 @@ async def verify_email_login(email: str, code: str) -> VerifiedEmail:
         if user.suspended:
             raise EmailAuthError("suspended")
         await db.commit()
-        token = sess.make(user.id, CLI_TOKEN_TTL, user.token_version)
-        session_cookie = sess.make(user.id, token_version=user.token_version)
+        token = sess.make_identity(user.id, user.token_version)
+        session_cookie = sess.make_session(user.id, token_version=user.token_version)
         return VerifiedEmail(token=token, email=user.email, session_cookie=session_cookie)
 
 
@@ -349,7 +348,7 @@ async def approve_cli_login(
                 raise CliPairingError("not_member")
             active_org = org.slug
         _cli_pending.pop(login_id, None)  # code matched, so consume the pending login before publishing
-        result = {"token": sess.make(user.id, CLI_TOKEN_TTL, user.token_version), "email": user.email}
+        result = {"token": sess.make_identity(user.id, user.token_version), "email": user.email}
         if active_org:
             result["active_org"] = active_org
         _cli_results[login_id] = (result, _utcnow_naive())
@@ -377,7 +376,7 @@ async def issue_cli_token(
                 if membership is not None:
                     org_slug = org.slug
         return {
-            "token": sess.make(user_id, CLI_TOKEN_TTL, token_version, org=org_slug),
+            "token": sess.make_identity(user_id, token_version, org=org_slug),
             "email": email,
             "org": org_slug,
         }
@@ -391,9 +390,9 @@ async def revoke_identity_tokens(user_id: int) -> RevokedIdentityTokens:
         user.token_version += 1
         await db.commit()
         return RevokedIdentityTokens(
-            token=sess.make(user.id, CLI_TOKEN_TTL, user.token_version),
+            token=sess.make_identity(user.id, user.token_version),
             email=user.email,
-            session_cookie=sess.make(user.id, token_version=user.token_version),
+            session_cookie=sess.make_session(user.id, token_version=user.token_version),
         )
 
 
@@ -574,7 +573,7 @@ async def invite_signin_landing(
                 raise InviteSigninError("expired")
             org = await db.get(Org, invite.org_id)
             switch_email = None
-            uid = sess.read(session_cookie)
+            uid = sess.read_session(session_cookie)
             if uid is not None:
                 current = await db.get(User, uid)
                 if current is not None and current.email != invite.email:
@@ -618,7 +617,7 @@ async def confirm_invite_signin(email_token: str) -> InviteSigninProof:
         )
         return InviteSigninProof(
             destination=destination,
-            session_cookie=sess.make(user.id, token_version=user.token_version),
+            session_cookie=sess.make_session(user.id, token_version=user.token_version),
         )
 
 

@@ -78,7 +78,7 @@ async def list_user_orgs(
     else:
         # X-Treg-Org wins, then a team-pinned identity token's claim, matching require_member.
         ref = x_treg_org or (
-            (sess.read_claims(x_treg_token) or {}).get("org", "") if x_treg_token else ""
+            (sess.read_identity_claims(x_treg_token) or {}).get("org", "") if x_treg_token else ""
         )
         org = await _resolve_org(ref, db)
         current = org.id if org else None

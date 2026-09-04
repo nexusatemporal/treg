@@ -67,10 +67,10 @@ async def test_landing_redirects_signed_in_visitor_to_app(web):
     r = await web.get("/", follow_redirects=False)
     assert r.status_code == 200  # anonymous → marketing landing
     uid = await _seed_user()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     r = await web.get("/", follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"] == "/app"
-    web.cookies.set("treg_session", sess.make(uid, ttl=-1))  # expired session → landing again
+    web.cookies.set("treg_session", sess.make_session(uid, ttl=-1))  # expired session → landing again
     r = await web.get("/", follow_redirects=False)
     assert r.status_code == 200
 
@@ -101,7 +101,7 @@ async def test_login_page_offers_session_reuse(web):
     """With a session, the page ships the picker container + HAS_SESSION=true (the "Continue as" /
     team list is rendered client-side by loadOrgs from /auth/cli/orgs)."""
     uid = await _seed_user()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     r = await web.get(f"/login?cli={LID}")
     assert r.status_code == 200
     assert 'id="orgpick"' in r.text and "HAS_SESSION=true" in r.text
@@ -118,7 +118,7 @@ async def test_login_page_offers_session_reuse(web):
 # ---- the org picker: /auth/cli/orgs + approve with a chosen team ---------------------------
 async def test_cli_orgs_lists_the_users_teams(web):
     uid, _ = await _seed_user_org(team="Acme", slug="acme", tools=3)
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     d = (await web.get("/auth/cli/orgs")).json()
     assert d["email"] == "pat@x.dev"
     assert d["orgs"] and d["orgs"][0]["slug"] == "acme" and d["orgs"][0]["tool_count"] == 3
@@ -138,7 +138,7 @@ async def test_cli_orgs_sorts_team_before_personal(web):
         s.add(Tool(org_id=o.id, name="stripe", owner="dev@x.dev", base_url="https://api.stripe.com",
                    host="api.stripe.com", bindings=[]))
         await s.commit()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     orgs = (await web.get("/auth/cli/orgs")).json()["orgs"]
     assert [o["slug"] for o in orgs] == ["superdesign", "dev-personal"]
     assert orgs[0]["personal"] is False and orgs[1]["personal"] is True
@@ -146,7 +146,7 @@ async def test_cli_orgs_sorts_team_before_personal(web):
 
 async def test_approve_with_org_scopes_the_handshake(web):
     uid, org = await _seed_user_org(team="Acme", slug="acme")
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     lid, code = await _start(web)
     r = await web.post("/auth/cli/approve", json={"login_id": lid, "org": "acme", "code": code})
     assert r.status_code == 200 and r.json()["active_org"] == "acme"
@@ -158,7 +158,7 @@ async def test_approve_rejects_a_foreign_org(web):
     uid, _ = await _seed_user_org(team="Acme", slug="acme")
     async with session_maker() as s:  # a team the user is NOT a member of
         s.add(Org(name="Other", slug="other")); await s.commit()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     lid, code = await _start(web)
     r = await web.post("/auth/cli/approve", json={"login_id": lid, "org": "other", "code": code})
     assert r.status_code == 403
@@ -167,7 +167,7 @@ async def test_approve_rejects_a_foreign_org(web):
 # ---- approve: completing the handshake from a session --------------------------------------
 async def test_approve_completes_the_cli_handshake(web):
     uid = await _seed_user()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     lid, code = await _start(web)
     r = await web.post("/auth/cli/approve", json={"login_id": lid, "code": code})
     assert r.status_code == 200 and r.json()["email"] == "pat@x.dev"
@@ -190,7 +190,7 @@ async def test_approve_accepts_same_host_origin(web):
     public_url — approve must accept the request's own host, not just public_url (regression:
     the first cut compared Origin to public_url only and broke every localhost login)."""
     uid = await _seed_user()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     lid, code = await _start(web)
     r = await web.post("/auth/cli/approve", json={"login_id": lid, "code": code},
                        headers={"Origin": "http://registry"})  # matches the test client's Host
@@ -199,7 +199,7 @@ async def test_approve_accepts_same_host_origin(web):
 
 async def test_approve_rejects_cross_origin(web):
     uid = await _seed_user()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     r = await web.post("/auth/cli/approve", json={"login_id": LID},
                        headers={"Origin": "https://evil.example"})
     assert r.status_code == 403
@@ -207,7 +207,7 @@ async def test_approve_rejects_cross_origin(web):
 
 async def test_approve_rejects_bad_login_id(web):
     uid = await _seed_user()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     r = await web.post("/auth/cli/approve", json={"login_id": "no"})
     assert r.status_code == 400
 
@@ -249,7 +249,7 @@ async def test_approve_requires_a_started_login_and_matching_code(web):
     wrong/blank code is refused — so a mailed /login?cli=<attacker_id> the victim never started (or
     whose code they don't have) never yields a token. A codeless poll of it returns pending."""
     uid = await _seed_user()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
 
     # a login_id that was never started (what an attacker's mailed link may carry) → refused, no token
     bogus = await web.post("/auth/cli/approve", json={"login_id": LID, "code": "7F3K"})
@@ -270,7 +270,7 @@ async def test_wrong_code_attempts_are_capped(web):
     discarded, so the real code can no longer be ground down (and the correct code then also fails)."""
     from treg.routers.auth import CLI_APPROVE_MAX_TRIES
     uid = await _seed_user()
-    web.cookies.set("treg_session", sess.make(uid))
+    web.cookies.set("treg_session", sess.make_session(uid))
     lid, code = await _start(web)
     for _ in range(CLI_APPROVE_MAX_TRIES):
         assert (await web.post("/auth/cli/approve", json={"login_id": lid, "code": "0000"})).status_code == 400
