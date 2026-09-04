@@ -534,14 +534,14 @@
   /* scrubbed: tiny linear transitions just to smooth discrete wheel steps */
   .d-bar, .bbar { transition: transform .1s linear; }
   .d-val, .d-lab, .d-cat, .bgroups, .bcol em { transition: opacity .1s linear; }
-  .bstage-wrap { position: relative; width: 100%; max-width: 1080px; height: 470px; margin: 0 auto; }
+  .bstage-wrap { position: relative; width: 100%; max-width: 1080px; height: 470px; margin: 0 auto; --dk: 2.4px; --bk: 2.9px; }  /* px per score point: duel bars / grouped bars */
   .duel {
     position: absolute; inset: 0; display: flex; justify-content: center; gap: 110px; align-items: flex-end;
     padding-bottom: 120px;
   }
   .d-col { position: relative; width: 200px; display: flex; flex-direction: column; align-items: center; }
   .d-bar {
-    width: 120px; height: calc(var(--h) * 2.4px); border-radius: 12px 12px 5px 5px; background: #D6D6D1;
+    width: 120px; height: calc(var(--h) * var(--dk)); border-radius: 12px 12px 5px 5px; background: #D6D6D1;
     transform: scaleY(0); transform-origin: 50% 100%; will-change: transform;
   }
   .d-bar.win { background: #118453; }
@@ -563,7 +563,7 @@
   .bcols { display: flex; gap: 14px; align-items: flex-end; height: 245px; }
   .bcol { position: relative; width: 44px; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
   .bbar {
-    display: block; width: 100%; height: calc(var(--h) * 2.9px); border-radius: 8px 8px 3px 3px; background: #D6D6D1;
+    display: block; width: 100%; height: calc(var(--h) * var(--bk)); border-radius: 8px 8px 3px 3px; background: #D6D6D1;
     transform: scaleY(0); transform-origin: 50% 100%; will-change: transform;
   }
   .bbar.win { background: #118453; }
@@ -572,14 +572,28 @@
     font-style: normal; font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap;
     opacity: 0;
   }
-  .bcol em { bottom: calc(var(--h) * 2.9px + 6px); }
+  .bcol em { bottom: calc(var(--h) * var(--bk) + 6px); }
   .bcol em.win { color: #118453; font-weight: 500; }
   .bico { position: absolute; left: 50%; transform: translateX(-50%); bottom: -34px; width: 26px; height: 26px; border-radius: 7px; object-fit: contain; background: #FBFAF7; border: 1px solid rgba(0,0,0,.07); }
   .bglab { margin-top: 46px; font-weight: 600; font-size: 15px; }
   @media (max-width: 720px) {
-    .duel { gap: 40px; }
-    .bgroups { gap: 26px; }
-    .bstage-wrap { height: 520px; }
+    .bench-stage { padding-top: 78px; justify-content: flex-start; }
+    .bench-stage h2 { font-size: 27px; margin-bottom: 8px; }
+    .bench-stage .lede { font-size: 15px; margin-bottom: 14px; }
+    .bstage-wrap { height: 500px; --dk: 1.9px; --bk: 1.5px; }
+    .duel { gap: 24px; padding-bottom: 170px; }
+    .d-col { width: 150px; }
+    .d-bar { width: 84px; }
+    .d-val { font-size: 24px; top: -38px; }
+    .d-lab { font-size: 13px; gap: 6px; white-space: normal; text-align: center; justify-content: center; flex-wrap: wrap; max-width: 150px; }
+    .d-lab img, .d-lab .d-treg { width: 20px; height: 20px; }
+    .d-cat { bottom: 70px; }
+    .bgroups { gap: 34px 22px; align-content: center; }
+    .bcols { gap: 7px; height: 132px; }
+    .bcol { width: 30px; }
+    .bcol em { font-size: 10px; }
+    .bico { width: 22px; height: 22px; bottom: -30px; }
+    .bglab { margin-top: 38px; font-size: 13px; }
   }
   @media (max-width: 880px) {
     .tool-grid { grid-template-columns: repeat(2, 1fr); }
@@ -590,6 +604,13 @@
   .nav-links a { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 500; color: #43413E; text-decoration: none; }
   .nav-links a:hover { color: var(--ink); }
   @media (max-width: 1020px) { .nav-links { display: none; } }
+  @media (max-width: 720px) {
+    .nav { padding: 10px 14px; }
+    .wordmark { white-space: nowrap; }
+    .nav .pill { white-space: nowrap; padding: 8px 14px; font-size: 13px; }
+    .nav .pill:not(.dark) { display: none; }
+    .hero { padding-top: 110px; }
+  }
   .cta-final { text-align: center; padding: 120px 24px 80px; }
   /* the "also available on" strip: icon links to the agent-agnostic page */
   .also-on { margin-top: 38px; display: flex; align-items: center; justify-content: center; gap: 12px; }
@@ -1535,7 +1556,10 @@
     groupsBox.style.opacity = sub(q, 0.46, 0.56);
     /* the magic move, scrubbed: the duel bars fly onto their chart twins */
     var t = easeInOut(sub(q, 0.50, 0.68));
-    if (t > 0 && !flyGeo && q < 0.52) measureFly();
+    /* measured lazily at any point before landing: until flyGeo exists the bars carry only a
+       scaleY, whose bottom edge and width are what measureFly reads — so a fast scroll (or a
+       resize mid-flight) that skips the take-off frame still gets a correct flight */
+    if (t > 0 && t < 1 && !flyGeo) measureFly();
     var landed = t >= 1;
     duelBox.style.visibility = landed ? 'hidden' : '';
     if (!landed) {
@@ -1570,5 +1594,6 @@
   });
 })();
 </script>
+<script src="/gtag.js"></script>
 </body>
 </html>

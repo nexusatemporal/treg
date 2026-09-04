@@ -39,7 +39,7 @@
       <li><b>We collect almost nothing about you.</b> An email address to sign in, the teams you're in, and a log of which tools were called. That's the account.</li>
       <li><b>Your credentials are encrypted and never returned.</b> No stored secret value is ever sent back to a client, shown in the dashboard, or read by us.</li>
       <li><b>We don't store what flows through the proxy.</b> A call's request and response bodies pass through and are gone. We keep the method, path, status code, and timestamp — not the content.</li>
-      <li><b>No trackers.</b> No analytics scripts, no advertising pixels, no third-party cookies. Two first-party cookies, both ours: one keeps you signed in, one (only if you arrived from a Google Ads click) tells us the ad worked.</li>
+      <li><b>Minimal tracking.</b> Two first-party cookies, both ours: one keeps you signed in, one (only if you arrived from a Google Ads click) tells us the ad worked. On marketing pages (the landing page and use-case pages, not the signed-in dashboard), we load Google's gtag.js so that signups from ad clicks are counted back to Google Ads — this sets Google's <code>_gcl_*</code> cookies and sends pageviews to Google. There is no analytics on the dashboard itself.</li>
       <li><b>No training, no selling.</b> Your credentials, skills, and connected-account data are never sold and never used to train models.</li>
     </ul>
   </div>
@@ -118,8 +118,9 @@
     <li>We never <b>sell</b> personal data, credentials, or anything reached through them.</li>
     <li>We never use your credentials, connected-account data, or skill content to <b>train machine
       learning models</b> — ours or anyone else's.</li>
-    <li>We never run <b>advertising, analytics, or tracking scripts</b> on our pages. There is no
-      Google Analytics, no pixel, no session-replay, no third-party cookie.</li>
+    <li>We do not run <b>analytics or session-replay scripts</b> on the signed-in dashboard. Marketing
+      pages (landing, use-case pages) load Google's gtag.js for ad-conversion measurement only — there
+      is no Google Analytics property, no pixel, and no session replay anywhere.</li>
     <li>We never use your stored credentials for anything other than the call you or a permitted
       teammate initiated, plus automated health checks and token refreshes.</li>
   </ul>
