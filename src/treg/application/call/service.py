@@ -879,6 +879,22 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                         drop_params=drop_params or None, force_identity=True)
                     response, body = await _buffer_response(response)
                     smoothed.append("retry=1")
+                if mk.async_owner_call_id and 200 <= response.status < 300:
+                    try:
+                        await async_task_app.remember_result_from_poll(
+                            mk.async_owner_call_id, body)
+                    except Exception:  # noqa: BLE001 - failure denies retrieval; never fail the poll
+                        logging.getLogger("treg.asynctasks").warning(
+                            "could not persist result ownership for %s",
+                            mk.async_owner_call_id, exc_info=True)
+                if mk.resource_ownership and 200 <= response.status < 300:
+                    try:
+                        await async_task_app.remember_platform_resources(
+                            caller.org_id, mk.provider, call_ref, mk.resource_ownership, body)
+                    except Exception:  # noqa: BLE001 - failure keeps later access fail-closed
+                        logging.getLogger("treg.asynctasks").warning(
+                            "could not persist async resource ownership for %s", call_ref,
+                            exc_info=True)
                 # The archive's recorder (docs/context/architecture/archive.md): the body is already
                 # in memory here for the settle, so observing it costs nothing on-request. Metered
                 # 2xx only — gate 3 of eligibility is exactly 'this fact, at this line'. Off unless

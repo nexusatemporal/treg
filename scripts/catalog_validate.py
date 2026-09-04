@@ -430,6 +430,36 @@ def check_async_descriptor(descriptor: object, where: str, provider: str,
         fail(errors, where, "an endpoint with async must have cost.type per_success")
 
 
+def check_resource_ownership(rule: object, where: str, input_schema: object,
+                             errors: list[str]) -> None:
+    """Validate declarative ownership of opaque ids on treg's shared provider account."""
+    if not isinstance(rule, dict) or not rule or set(rule) - {"requires", "produces"}:
+        fail(errors, where, "resource_ownership must contain only requires and/or produces")
+        return
+    required = rule.get("requires")
+    if required is not None:
+        if (not isinstance(required, dict) or set(required) != {"kind", "param"}
+                or not all(isinstance(required.get(k), str) and required[k].strip()
+                           for k in ("kind", "param"))):
+            fail(errors, where, "resource_ownership.requires needs exactly non-empty kind and param")
+        else:
+            fields = _input_fields(input_schema)
+            name = required["param"]
+            if not any(field in fields for field in (f"pathParams.{name}", f"queryParams.{name}")):
+                fail(errors, where, f"resource_ownership requires undeclared parameter '{name}'")
+    produced = rule.get("produces")
+    if produced is not None:
+        if not isinstance(produced, list) or not produced:
+            fail(errors, where, "resource_ownership.produces must be a non-empty list")
+        else:
+            for item in produced:
+                if (not isinstance(item, dict) or set(item) != {"kind", "path"}
+                        or not isinstance(item.get("kind"), str) or not item["kind"].strip()
+                        or not isinstance(item.get("path"), str)
+                        or not JSON_PATH.fullmatch(item["path"])):
+                    fail(errors, where, "each resource_ownership.produces item needs exactly kind and JSON path")
+
+
 def check_cost(cost: dict, where: str, errors: list[str], warnings: list[str],
                input_schema: object = None) -> None:
     """The price block's own rules — the ones that make a figure BILLABLE rather than decorative.
@@ -782,6 +812,8 @@ def main(argv: list[str]) -> int:
                 # Usage evidence is read from the TERMINAL response by the worker; a synchronous
                 # response path has no consumer for it and would silently settle the reserve.
                 fail(errors, where, "cost.settle 'usage' requires an async descriptor")
+            if ep.get("resource_ownership") is not None:
+                check_resource_ownership(ep["resource_ownership"], where, inp, errors)
             if ep.get("verified"):
                 ex = ep.get("example_response")
                 if not ex:

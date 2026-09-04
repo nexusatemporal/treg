@@ -690,6 +690,9 @@ class AsyncTaskRecord(SQLModel, table=True):
     provider: str = Field(index=True)
     endpoint_id: str = Field(index=True)
     task_id: str | None = Field(default=None, index=True)
+    # A fetch-mode descriptor may expose a different provider id after success (MiniMax file_id).
+    # It is learned only from an org-authorized terminal poll or the settlement worker.
+    result_id: str | None = Field(default=None, index=True)
     poll_url: str | None = Field(default=None)
     reserved_micro: int
     descriptor: dict = Field(default_factory=dict, sa_column=Column("descriptor", JSON, nullable=False))
@@ -704,6 +707,25 @@ class AsyncTaskRecord(SQLModel, table=True):
     error: str = Field(default="")
     settled_micro: int | None = Field(default=None)
     completed_at: datetime | None = Field(default=None, index=True)
+
+
+class AsyncResourceRecord(SQLModel, table=True):
+    """An opaque object created on a shared provider account and owned by one org."""
+
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "provider", "resource_kind", "resource_id",
+            name="uq_asyncresource_org_provider_kind_id",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="org.id", index=True)
+    provider: str = Field(index=True)
+    resource_kind: str = Field(index=True)
+    resource_id: str = Field(index=True)
+    source_call_id: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_now, index=True)
 
 
 class TagSpend(SQLModel, table=True):

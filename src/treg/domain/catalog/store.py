@@ -548,6 +548,9 @@ def _normalize(raw: dict, provider: str, directory: Path) -> dict:
         # How an async submission is followed to a terminal result. Provider-file defaults have
         # already been merged above; consumers always see the complete effective descriptor.
         "async": raw.get("async") or None,
+        # Opaque shared-account objects created/read by legacy async endpoint pairs. Resolution
+        # enforces `requires`; the buffered successful response persists every `produces` path.
+        "resource_ownership": raw.get("resource_ownership") or None,
         "cost": _effective_cost(raw),
         # Absent `tier` means core: the curated first wave predates the split, and treating an
         # unmarked endpoint as extended would hide it from the platform view entirely.

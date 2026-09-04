@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from urllib.parse import quote, urlsplit
 
+from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -25,7 +26,7 @@ from ...domain.governance import access as access_policy
 from ...domain.identity.access import Caller
 from ...domain.money import settlement as settlement_basis
 from ...infra.db import session_maker
-from ...models import CapabilityPin, Org, Secret, Tool
+from ...models import AsyncResourceRecord, AsyncTaskRecord, CapabilityPin, Org, Secret, Tool
 from ..connect import _host_of, _provider_bindings
 from .types import ResolutionFailed, ResolvedTarget
 
@@ -314,6 +315,10 @@ class MarketplaceCall:
     settlement_basis: dict = field(default_factory=dict)
     request_data: dict = field(default_factory=dict)
     async_descriptor: dict | None = None
+    resource_ownership: dict | None = None
+    # A platform-key utility poll was authorized against this org-owned submission. The buffered
+    # response may teach the same row its provider result/file id before the background worker runs.
+    async_owner_call_id: str | None = None
     # Admitted through an active capacity lock as its probe (domain.capacity.marks): a 2xx clears
     # exactly that lock.
     probe_lock_id: str | None = None
@@ -804,6 +809,195 @@ def _marketplace_upstream(
     return provider.base_url.rstrip("/") + "/" + path.lstrip("/"), consumed
 
 
+class _DuplicateJsonKey(ValueError):
+    pass
+
+
+def _strict_json_object(body: bytes, ep_id: str) -> dict:
+    """Parse a platform request without accepting ambiguous duplicate JSON keys."""
+    def object_pairs(pairs):
+        result = {}
+        for name, value in pairs:
+            if name in result:
+                raise _DuplicateJsonKey(str(name))
+            result[name] = value
+        return result
+
+    try:
+        document = json.loads(body, object_pairs_hook=object_pairs)
+    except _DuplicateJsonKey as exc:
+        raise ResolutionFailed(
+            "catalog_parameter_invalid", status_code=400,
+            detail=f"{ep_id} request body repeats JSON field {str(exc)!r}",
+        ) from None
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ResolutionFailed(
+            "catalog_parameter_invalid", status_code=400,
+            detail=f"{ep_id} requires a JSON request body",
+        ) from None
+    if not isinstance(document, dict):
+        raise ResolutionFailed(
+            "catalog_parameter_invalid", status_code=400,
+            detail=f"{ep_id} requires a JSON object request body",
+        )
+    return document
+
+
+def _input_spec(input_schema: dict, dotted: str) -> dict | None:
+    """Find a catalog body-field spec across the direct-map and nested-properties shapes."""
+    current: object = input_schema.get("body") or {}
+    for part in dotted.split("."):
+        if not isinstance(current, dict):
+            return None
+        if part in current:
+            current = current[part]
+        else:
+            current = (current.get("properties") or {}).get(part)
+    return current if isinstance(current, dict) else None
+
+
+def _document_value(document: object, dotted: str) -> object:
+    current = document
+    for part in dotted.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _enforce_platform_pricing_selectors(ep: dict, body: bytes) -> None:
+    """Bind a platform-priced row to its fixed request discriminator before reserve/relay.
+
+    Catalog tables may price several rows on one upstream path. A table condition whose body field
+    has a singleton enum is the row identity, not caller choice: accepting another value lets a cheap
+    row reserve for an expensive model. Full schema validation remains out of the faithful BYOK path.
+    """
+    input_schema = ep.get("input") or {}
+    selectors: dict[str, object] = {}
+    for row in (ep.get("cost") or {}).get("table") or []:
+        for path in (row.get("when") or {}):
+            if not str(path).startswith("body."):
+                continue
+            relative = str(path)[len("body."):]
+            spec = _input_spec(input_schema, relative)
+            allowed = spec.get("enum") if spec else None
+            if isinstance(allowed, list) and len(allowed) == 1:
+                selectors[relative] = allowed[0]
+    if not selectors:
+        return
+    document = _strict_json_object(body, ep["id"])
+    for path, expected in sorted(selectors.items()):
+        actual = _document_value(document, path)
+        if actual != expected:
+            raise ResolutionFailed(
+                "catalog_parameter_invalid", status_code=400, detail={
+                    "error": "catalog_parameter_invalid",
+                    "endpoint_id": ep["id"],
+                    "parameter": f"body.{path}",
+                    "expected": expected,
+                    "message": (
+                        f"{ep['id']} fixes body.{path} to {expected!r}; "
+                        "choose the catalog endpoint for the requested value"
+                    ),
+                },
+            )
+
+
+def _async_resource_refs(ep: dict) -> list[tuple[str, dict]]:
+    """How this utility is referenced by effective async descriptors in the live catalog."""
+    refs: list[tuple[str, dict]] = []
+    for candidate in catalog_store.load().endpoints:
+        if candidate.get("provider") != ep.get("provider"):
+            continue
+        descriptor = candidate.get("async") or {}
+        poll = descriptor.get("poll") or {}
+        if poll.get("endpoint") == ep.get("id") and isinstance(poll.get("param"), dict):
+            refs.append(("poll", poll["param"]))
+        result = descriptor.get("result") or {}
+        if result.get("fetch") == ep.get("id") and isinstance(result.get("fetch_param"), dict):
+            refs.append(("fetch", result["fetch_param"]))
+    return refs
+
+
+def _one_resource_value(ep: dict, query: QueryValues, refs: list[tuple[str, dict]]) -> str:
+    supplied: list[str] = []
+    for _, param in refs:
+        name = str(param.get("name") or "")
+        supplied.extend(value for key, value in query.items if key == name)
+    values = set(supplied)
+    if len(values) != 1:
+        raise ResolutionFailed(
+            "catalog_parameter_invalid", status_code=400,
+            detail=f"{ep['id']} requires exactly one unambiguous async resource id",
+        )
+    return values.pop()
+
+
+def _descriptor_ref(descriptor: dict, kind: str) -> tuple[str, dict]:
+    if kind == "poll":
+        rule = descriptor.get("poll") or {}
+        return str(rule.get("endpoint") or ""), rule.get("param") or {}
+    rule = descriptor.get("result") or {}
+    return str(rule.get("fetch") or ""), rule.get("fetch_param") or {}
+
+
+async def _enforce_platform_async_ownership(
+    ep: dict, query: QueryValues, caller: Caller, db: AsyncSession,
+) -> str | None:
+    """Authorize shared-key task/result utilities through the caller org's durable submission."""
+    ownership = ep.get("resource_ownership") or {}
+    required = ownership.get("requires") or {}
+    resource_owned = False
+    if required:
+        value = _one_resource_value(ep, query, [("resource", {"name": required.get("param")})])
+        resource_owned = (await db.execute(select(AsyncResourceRecord.id).where(
+            AsyncResourceRecord.org_id == caller.org_id,
+            AsyncResourceRecord.provider == ep["provider"],
+            AsyncResourceRecord.resource_kind == required.get("kind"),
+            AsyncResourceRecord.resource_id == value,
+        ))).scalar_one_or_none() is not None
+
+    refs = _async_resource_refs(ep)
+    if not refs:
+        if required and not resource_owned:
+            raise _async_resource_denied()
+        return None
+    value = _one_resource_value(ep, query, refs)
+    candidates = (await db.execute(select(AsyncTaskRecord).where(
+        AsyncTaskRecord.org_id == caller.org_id,
+        AsyncTaskRecord.provider == ep["provider"],
+        or_(AsyncTaskRecord.task_id == value, AsyncTaskRecord.result_id == value),
+    ))).scalars().all()
+    for row in candidates:
+        for kind, current_param in refs:
+            endpoint_id, frozen_param = _descriptor_ref(row.descriptor or {}, kind)
+            if endpoint_id != ep["id"] or frozen_param != current_param:
+                continue
+            if kind == "poll" and row.task_id == value:
+                return row.call_id
+            if kind == "fetch":
+                result = (row.descriptor or {}).get("result") or {}
+                same_as_task = (
+                    row.task_id == value
+                    and (result.get("fetch_param") or {}).get("value_from")
+                    == (row.descriptor or {}).get("id_from")
+                )
+                if row.result_id == value or same_as_task:
+                    return None
+    if resource_owned:
+        return None
+    raise _async_resource_denied()
+
+
+def _async_resource_denied() -> ResolutionFailed:
+    return ResolutionFailed(
+        "async_resource_not_owned", status_code=403, detail={
+            "error": "async_resource_not_owned",
+            "message": "this async task or result is not available to the current team",
+        },
+    )
+
+
 async def _enforce_capability_pin(ep: dict, caller: Caller, db: AsyncSession) -> None:
     """Refuse a catalog call that goes around the team's pin for that capability.
 
@@ -1030,7 +1224,7 @@ async def _resolve_marketplace_call(
         # a `per_result` settle that can't count rows can only ever bill the estimate,
         # which is how 6,000 delivered Bright Data records once billed as one (2026-08-24).
         unit_micro=info_unit, settlement_basis=basis, request_data=request_data,
-        async_descriptor=ep.get("async"),
+        async_descriptor=ep.get("async"), resource_ownership=ep.get("resource_ownership"),
     )
     if chosen_tool is not None:
         return MarketplaceCall(tool=chosen_tool, tier="tool", **common)
@@ -1057,6 +1251,10 @@ async def _resolve_marketplace_call(
     # an org that brought its own credential is billed by the provider, not by us, and must never be
     # silently switched onto our key (their quota, their rate limits, their data agreements).
     cost = _platform_offer(ep, provider, caller.org)
+    async_owner_call_id = None
+    if cost is not None:
+        _enforce_platform_pricing_selectors(ep, body)
+        async_owner_call_id = await _enforce_platform_async_ownership(ep, query, caller, db)
     skip_direct = False
     probe_lock_id = None
     if cost is not None and capacity_view.is_exhausted(service, ep["id"]):
@@ -1082,6 +1280,7 @@ async def _resolve_marketplace_call(
             bindings=_platform_bindings(provider),
         )
         return MarketplaceCall(tool=virtual, tier="platform", skip_direct=skip_direct,
+                               async_owner_call_id=async_owner_call_id,
                                probe_lock_id=probe_lock_id, **{
             **common, "cost_type": str(cost.get("type") or "per_call"),
             "estimate_micro": info_est, "unit_micro": info_unit})

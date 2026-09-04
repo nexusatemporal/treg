@@ -14,6 +14,7 @@ sources:
   - src/treg/application/call/evidence.py
   - src/treg/application/call/service.py
   - src/treg/application/call/types.py
+  - src/treg/application/asynctasks.py
   - src/treg/client_identity.py
   - src/treg/call_surface.py
   - src/treg/sandbox_identity.py
@@ -30,6 +31,7 @@ sources:
   - tests/test_tag_billing.py
   - tests/test_tag_billing_adversarial.py
   - tests/test_call_architecture.py
+  - tests/test_asynctasks.py
 related:
   - architecture/data-model.md
   - architecture/auth-secrets.md
@@ -474,3 +476,19 @@ no task id), in which case it settles at zero at once; a persistence failure rel
 an alert. `routers/call._attach_async_descriptor` adds `X-Treg-Async` (the effective descriptor) to
 the response, also on an idempotent replay, so a retried `--await` polls the task already running.
 The settlement itself is the money fragment's subject.
+
+Tier-4 calls add two checks before reserve and relay that deliberately do not apply to BYOK. First,
+a body field used as a table-pricing discriminator and declared as a singleton catalog enum (for
+example OpenRouter's `model`) must equal that fixed value; strict JSON parsing rejects duplicate keys
+that could make validation and upstream interpretation disagree. Second, endpoints referenced as an
+async descriptor's poll or fetch utility accept only task/result ids present in an
+`AsyncTaskRecord` for the caller's org and provider, with the same frozen endpoint/parameter rule.
+Legacy async pairs use catalog `resource_ownership` metadata and `AsyncResourceRecord` for the same
+check without changing their existing settlement behavior. Formal submissions mirror their
+poll/fetch ids into that table too, so removing a live descriptor reference cannot make its utility
+fail open; pre-migration pending rows still authorize through their frozen descriptor.
+Extended task consumers whose producer provenance is not modeled are catalogued as BYOK-only via
+`platform_blocked`, rather than accepting an unverifiable task id on the shared account.
+Unknown and cross-org ids receive the same 403 without contacting the provider. Fetch-mode result ids
+are learned from an authorized successful poll or from the worker's terminal response. BYOK keeps its
+faithful-relay semantics because those ids belong to the caller's own provider account.

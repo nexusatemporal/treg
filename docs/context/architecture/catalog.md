@@ -57,6 +57,13 @@ sources:
   - src/treg/catalog/instagram.extended.yaml
   - src/treg/catalog/justoneapi.extended.yaml
   - src/treg/catalog/minimax.yaml
+  - src/treg/catalog/apify.yaml
+  - src/treg/catalog/brightdata.yaml
+  - src/treg/catalog/companyenrich.yaml
+  - src/treg/catalog/oceanio.yaml
+  - src/treg/catalog/akta.extended.yaml
+  - src/treg/catalog/dataforseo.extended.yaml
+  - src/treg/catalog/tikhub.extended.yaml
   - src/treg/catalog/examples/minimax.video-gen.result.retrieve.json
   - src/treg/catalog/examples/minimax.video-gen.from_image.json
   - src/treg/catalog/examples/minimax.video-gen.task.status.json
@@ -66,7 +73,6 @@ sources:
   - src/treg/catalog/replicate.yaml
   - src/treg/catalog/replicate.extended.yaml
   - src/treg/catalog/examples/replicate.image-gen.flux-schnell.json
-  - src/treg/catalog/tikhub.extended.yaml
   - src/treg/domain/catalog/__init__.py
   - src/treg/domain/catalog/store.py
   - src/treg/domain/money/settlement.py
@@ -405,6 +411,27 @@ faithfully execute it. Dynamic URLs require a non-empty `url_hosts` allow-list. 
 beside the faithful relay: it never changes provider-native parameters or response bodies. The call
 router serializes the effective descriptor into `X-Treg-Async` before the response stream starts;
 it does not inspect or buffer the upstream body.
+
+Older async pairs that settle on their existing request paths use `resource_ownership` alongside
+the deferred-settlement design. `produces` maps response JSON paths to provider-local resource
+kinds; `requires` binds a path/query parameter to one of those kinds. On treg's shared key, a 2xx
+producer records the opaque id for the caller org, and a consumer is refused before relay unless the
+same org owns that provider/kind/id tuple. This covers Apify run/dataset ids, Bright Data snapshot
+ids, and CompanyEnrich bulk job ids without changing their billing behavior. The validator requires
+declared parameters and exact non-empty `{kind, path}` / `{kind, param}` shapes. BYOK does not use
+this metadata because the provider account itself belongs to the caller.
+Formal descriptors also materialize their poll/fetch ids under endpoint-namespaced resource kinds;
+their utility rows declare matching `requires` rules. The frozen `AsyncTaskRecord` remains the
+compatibility authority for tasks created before the resource table existed, while the explicit
+utility rule prevents a later catalog edit from silently turning a protected endpoint fail-open.
+The catalog test additionally rejects platform-eligible task/status/result object reads that have a
+required id but omit this metadata, so new legacy-style pairs cannot rely on a reviewer noticing the
+boundary by hand.
+Generated legacy task consumers for which no trustworthy producer→id chain is represented are
+explicitly `platform_blocked` instead: Akta request status, TikHub's captions-result route, and the
+DataForSEO on-page/SERP task consumers remain callable with BYOK but never receive treg's shared key.
+`carry_verification` preserves that reviewed block across re-ingestion just like a verification
+stamp; silently regenerating it away would reopen the tenant boundary.
 
 MiniMax's curated Hailuo routes intentionally use the v1 three-step protocol: submit with
 `POST /v1/video_generation`, poll `GET /v1/query/video_generation` with a query-string task id and

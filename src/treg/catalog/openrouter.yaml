@@ -49,6 +49,8 @@ endpoints:
     path: /videos/{id}
     name: "Check an OpenRouter video task"
     summary: "Read the status, terminal usage, and output metadata for an OpenRouter video task."
+    resource_ownership:
+      requires: {kind: "poll:openrouter.video-gen.task.status", param: id}
     input:
       pathParams:
         id: {type: string, required: true, example: job-abc123}
@@ -66,6 +68,8 @@ endpoints:
     path: /videos/{id}/content
     name: "Retrieve OpenRouter video content"
     summary: "Retrieve the generated binary video content after a task completes."
+    resource_ownership:
+      requires: {kind: "fetch:openrouter.video-gen.result.retrieve", param: id}
     input:
       pathParams:
         id: {type: string, required: true, example: job-abc123}

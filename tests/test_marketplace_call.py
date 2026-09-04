@@ -1668,6 +1668,14 @@ async def test_brightdata_snapshot_download_bills_the_jobs_records(
         clients: AsyncClient, platform_on, monkeypatch):
     """The async job's records bill at the snapshot download — the endpoint that was cataloged
     `free` while $9.09 of Google Play reviews rode through it unbilled."""
+    monkeypatch.setattr(call_service, "relay", _fake_relay(
+        202, b'{"snapshot_id": "sd_test123"}'))
+    started = await clients.post(
+        "/call/brightdata.web.scrape.structured?dataset_id=gd_x",
+        json=[{"url": "https://x/0"}],
+    )
+    assert started.status_code == 202
+
     records = [{"review": f"r{i}"} for i in range(40)]
     monkeypatch.setattr(call_service, "relay", _fake_relay(200, json.dumps(records).encode()))
     before = await _balance(clients)

@@ -130,6 +130,10 @@ endpoints:
     path: /v1/query/video_generation
     name: "Check a Hailuo video task"
     summary: "Read the current status and generated file ID for a Hailuo video task."
+    resource_ownership:
+      requires: {kind: "poll:minimax.video-gen.task.status", param: task_id}
+      produces:
+        - {kind: "fetch:minimax.video-gen.result.retrieve", path: file_id}
     async: false
     input:
       queryParams:
@@ -149,6 +153,8 @@ endpoints:
     path: /v1/files/retrieve
     name: "Retrieve a generated Hailuo file"
     summary: "Exchange a successful video task's file ID for its temporary download URL."
+    resource_ownership:
+      requires: {kind: "fetch:minimax.video-gen.result.retrieve", param: file_id}
     async: false
     input:
       queryParams:
@@ -230,6 +236,8 @@ endpoints:
     path: /v2/query/video_generation/{task_id}
     name: "Check a Hailuo 3 video task"
     summary: "Read a v2 (H3 family) video task's status; a succeeded task carries its time-limited download URL at task.content.url."
+    resource_ownership:
+      requires: {kind: "poll:minimax.video-gen.v2.task.status", param: task_id}
     async: false
     input:
       pathParams:

@@ -19,7 +19,7 @@ from ..domain.catalog import store as catalog_store
 from ..domain.money import settlement
 from ..infra.db import session_maker
 from ..infra.upstream.relay import relay
-from ..models import AsyncTaskRecord, Hold, Tool
+from ..models import AsyncResourceRecord, AsyncTaskRecord, Hold, Tool
 from ..timeutil import utcnow_naive
 from .call.resolve import _host_of, _platform_bindings
 from .call.types import UpstreamRequest
@@ -50,16 +50,114 @@ async def defer_submission(mk, body: bytes, org_id: int) -> int:
         hold = await db.get(Hold, mk.call_id)
         if hold is None:
             raise RuntimeError("async submission hold disappeared before persistence")
-        db.add(AsyncTaskRecord(
+        row = AsyncTaskRecord(
             call_id=str(mk.call_id), org_id=org_id, provider=mk.provider,
             endpoint_id=mk.endpoint_id, task_id=task_id, poll_url=poll_url,
             reserved_micro=hold.amount_micro, descriptor=_json_value(mk.async_descriptor or {}),
             settlement_basis=_json_value(mk.settlement_basis),
             created_at=now, next_check_at=due, error=error,
-        ))
+        )
+        db.add(row)
+        if task_id is not None:
+            poll = (row.descriptor or {}).get("poll") or {}
+            if poll.get("endpoint"):
+                await _remember_resource(db, row, f"poll:{poll['endpoint']}", task_id)
+            result = (row.descriptor or {}).get("result") or {}
+            if (result.get("fetch")
+                    and (result.get("fetch_param") or {}).get("value_from")
+                    == (row.descriptor or {}).get("id_from")):
+                await _remember_resource(db, row, f"fetch:{result['fetch']}", task_id)
         await db.commit()
     mk.call_id = None
     return int(hold.amount_micro)
+
+
+def _result_id(descriptor: dict, document: object) -> str | None:
+    fetch = asynctasks.artifact(descriptor, document).get("fetch")
+    return str(fetch["value"]) if fetch and fetch.get("value") not in (None, "") else None
+
+
+def _dotted(document: object, path: str) -> object:
+    value = document
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value
+
+
+async def _remember_resource(db, row: AsyncTaskRecord, kind: str, resource_id: str) -> None:
+    exists = (await db.execute(select(AsyncResourceRecord.id).where(
+        AsyncResourceRecord.org_id == row.org_id,
+        AsyncResourceRecord.provider == row.provider,
+        AsyncResourceRecord.resource_kind == kind,
+        AsyncResourceRecord.resource_id == resource_id,
+    ))).scalar_one_or_none()
+    if exists is None:
+        db.add(AsyncResourceRecord(
+            org_id=row.org_id, provider=row.provider, resource_kind=kind,
+            resource_id=resource_id, source_call_id=row.call_id,
+        ))
+
+
+async def remember_platform_resources(
+    org_id: int, provider: str, call_id: str, rule: dict, body: bytes,
+) -> int:
+    """Persist opaque ids a successful call created on treg's shared provider account."""
+    try:
+        document = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return 0
+    resources = {
+        (str(item.get("kind") or ""), str(value))
+        for item in rule.get("produces") or []
+        if isinstance(item, dict)
+        and (value := _dotted(document, str(item.get("path") or ""))) not in (None, "")
+    }
+    if not resources:
+        return 0
+    added = 0
+    async with session_maker() as db:
+        for kind, resource_id in resources:
+            exists = (await db.execute(select(AsyncResourceRecord.id).where(
+                AsyncResourceRecord.org_id == org_id,
+                AsyncResourceRecord.provider == provider,
+                AsyncResourceRecord.resource_kind == kind,
+                AsyncResourceRecord.resource_id == resource_id,
+            ))).scalar_one_or_none()
+            if exists is None:
+                db.add(AsyncResourceRecord(
+                    org_id=org_id, provider=provider, resource_kind=kind,
+                    resource_id=resource_id, source_call_id=call_id,
+                ))
+                added += 1
+        await db.commit()
+    return added
+
+
+async def remember_result_from_poll(call_id: str, body: bytes) -> bool:
+    """Learn a fetch-mode result id from a caller's already-authorized platform poll.
+
+    The CLI may observe success before the minute worker does. Persisting the id here lets its next
+    retrieval pass the same org boundary; malformed/nonterminal responses simply teach nothing.
+    """
+    try:
+        document = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    async with session_maker() as db:
+        row = await db.get(AsyncTaskRecord, call_id, with_for_update=True)
+        if row is None or asynctasks.classify_terminal(row.descriptor, document) != "success":
+            return False
+        result_id = _result_id(row.descriptor, document)
+        if result_id is None:
+            return False
+        row.result_id = result_id
+        fetch = (row.descriptor or {}).get("result") or {}
+        if fetch.get("fetch"):
+            await _remember_resource(db, row, f"fetch:{fetch['fetch']}", result_id)
+        await db.commit()
+        return True
 
 
 async def views_for(org_id: int, call_ids: list[str]) -> dict[str, dict]:
@@ -208,6 +306,10 @@ async def _finish(call_id: str, outcome: str, document: object | None, now) -> s
             return row.status
         if outcome == "success":
             evidence = {"terminal": document}
+            row.result_id = _result_id(row.descriptor, document)
+            fetch = (row.descriptor or {}).get("result") or {}
+            if row.result_id is not None and fetch.get("fetch"):
+                await _remember_resource(db, row, f"fetch:{fetch['fetch']}", row.result_id)
             raw = settlement.settle(row.settlement_basis, evidence)
             unobserved = (row.settlement_basis["amount"]["kind"] == "usage"
                           and settlement.usage_evidence(row.settlement_basis, evidence) is None)

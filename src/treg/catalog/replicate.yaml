@@ -154,6 +154,8 @@ endpoints:
     path: /predictions/{id}
     name: "Check a Replicate prediction"
     summary: "Read a prediction's status; a succeeded prediction carries its output URL(s) in `output`. Copy outputs promptly: Replicate removes prediction data after a retention window."
+    resource_ownership:
+      requires: {kind: "poll:replicate.predictions.get", param: id}
     async: false
     input:
       pathParams:

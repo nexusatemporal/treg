@@ -194,7 +194,7 @@ def carry_verification(provider: str, endpoints: list[dict], *, carry_capability
         if prev.get("method") != ep.get("method") or prev.get("path") != ep.get("path"):
             continue
         carried_fields = [
-            "verified", "example_response", "unverified", "name", "kind",
+            "verified", "example_response", "unverified", "name", "kind", "platform_blocked",
             # Meta publishes no machine-readable request schema or grant matrix. These contracts
             # are reviewed against its HTML docs and must survive the next deterministic ingest.
             "input", "authorization_method", "authorization_methods", "authorization_paths",

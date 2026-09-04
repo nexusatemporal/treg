@@ -1,6 +1,7 @@
 import pytest
 
 from scripts import catalog_validate as validator
+from treg.domain.catalog import store as catalog_store
 
 
 def test_cost_modifiers_accept_only_supported_declarative_credit_rules():
@@ -207,6 +208,75 @@ def test_async_descriptor_rejects_unknown_keys_and_invalid_json_paths():
     errors = _async_errors(descriptor)
     assert any("async has unknown keys" in error for error in errors)
     assert any("value_from must be a dotted" in error for error in errors)
+
+
+def test_resource_ownership_contract_validates_ids_and_declared_parameters():
+    errors: list[str] = []
+    validator.check_resource_ownership(
+        {"requires": {"kind": "job", "param": "job_id"},
+         "produces": [{"kind": "result", "path": "data.result_id"}]},
+        "demo.yaml:status", {"pathParams": {"job_id": {"type": "string"}}}, errors,
+    )
+    assert errors == []
+    validator.check_resource_ownership(
+        {"requires": {"kind": "", "param": "missing"},
+         "produces": [{"kind": "result", "path": "bad..path"}]},
+        "demo.yaml:status", {}, errors,
+    )
+    assert any("requires needs exactly" in error for error in errors)
+    assert any("produces item needs exactly" in error for error in errors)
+
+
+def test_platform_async_object_reads_cannot_silently_omit_ownership_metadata():
+    """A new/edited shared-account task reader must fail CI instead of becoming fail-open."""
+    catalog = catalog_store.load()
+    missing = []
+    for endpoint in catalog.endpoints:
+        capability = str(endpoint.get("capability") or "")
+        inputs = endpoint.get("input") or {}
+        path_ids = [name for name, spec in (inputs.get("pathParams") or {}).items()
+                    if isinstance(spec, dict) and spec.get("required")
+                    and name.lower().endswith(("id", "_id"))]
+        query_ids = [name for name, spec in (inputs.get("queryParams") or {}).items()
+                     if isinstance(spec, dict) and spec.get("required")
+                     and name.lower().endswith(("id", "_id"))]
+        looks_like_object_read = (
+            endpoint.get("method") == "GET"
+            and capability.endswith((".status", ".results"))
+            and (path_ids or (endpoint.get("kind") == "utility" and query_ids))
+        )
+        if (catalog.platform_eligible(endpoint) and looks_like_object_read
+                and not (endpoint.get("resource_ownership") or {}).get("requires")):
+            missing.append(endpoint["id"])
+    assert missing == []
+
+
+def test_untracked_extended_async_consumers_are_explicitly_byok_only():
+    catalog = catalog_store.load()
+    ids = {
+        "akta.x.request-status",
+        "tikhub.x.youtube-web-v2-get-video-captions-result",
+        "dataforseo.x.serp-ai-summary",
+        "dataforseo.x.serp-screenshot",
+        "dataforseo.x.on-page-content-parsing",
+        "dataforseo.x.on-page-duplicate-content",
+        "dataforseo.x.on-page-duplicate-tags",
+        "dataforseo.x.on-page-keyword-density",
+        "dataforseo.x.on-page-links",
+        "dataforseo.x.on-page-non-indexable",
+        "dataforseo.x.on-page-pages",
+        "dataforseo.x.on-page-pages-by-resource",
+        "dataforseo.x.on-page-raw-html",
+        "dataforseo.x.on-page-redirect-chains",
+        "dataforseo.x.on-page-resources",
+        "dataforseo.x.on-page-uncrawlable-resources",
+        "dataforseo.x.on-page-waterfall",
+        "dataforseo.x.on-page-summary-id",
+    }
+    for endpoint_id in ids:
+        endpoint = catalog.by_id[endpoint_id]
+        assert endpoint["platform_blocked"]
+        assert not catalog.platform_eligible(endpoint)
 
 
 def _valid_table():

@@ -19,14 +19,16 @@ from treg.domain import asynctasks
 from treg.domain import money as ledger
 from treg.domain.money import settlement
 from treg.infra.db import session_maker
-from treg.models import ArchiveKey, ArchiveSnapshot, AsyncTaskRecord, Hold, LedgerEntry
+from treg.models import (
+    ArchiveKey, ArchiveSnapshot, AsyncResourceRecord, AsyncTaskRecord, Hold, LedgerEntry,
+)
 from treg.timeutil import utcnow_naive
 
 
 EP = "replicate.image-gen.flux-schnell"
 
 
-def _response(status: int, document: dict) -> UpstreamResponse:
+def _response(status: int, document: object) -> UpstreamResponse:
     body = json.dumps(document).encode()
 
     async def stream():
@@ -167,6 +169,311 @@ def minimax_platform(monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def openrouter_platform(monkeypatch):
+    monkeypatch.setenv("TREG_PLATFORM_KEY_OPENROUTER", "test-platform-token")
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "openrouter")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def legacy_async_platform(monkeypatch):
+    for provider in ("apify", "brightdata", "companyenrich", "oceanio"):
+        monkeypatch.setenv(f"TREG_PLATFORM_KEY_{provider.upper()}", "test-platform-token")
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "apify,brightdata,companyenrich,oceanio")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+async def test_platform_openrouter_model_is_bound_to_the_selected_catalog_row(
+    clients: AsyncClient, monkeypatch, openrouter_platform,
+):
+    relayed = []
+
+    async def fake_relay(*args, **kwargs):
+        relayed.append(True)
+        return _response(201, {"id": "video-owned"})
+
+    monkeypatch.setattr(call_service, "relay", fake_relay)
+    endpoint = "/call/openrouter.x.google-veo-3-1-lite"
+    body = {"model": "black-forest-labs/flux-3-video", "prompt": "A paper boat.",
+            "duration": 4, "resolution": "720p", "generate_audio": True}
+    refused = await clients.post(endpoint, json=body)
+    assert refused.status_code == 400
+    assert refused.json()["detail"]["parameter"] == "body.model"
+    assert relayed == []
+    async with session_maker() as db:
+        assert (await db.execute(select(Hold))).scalars().all() == []
+
+    body["model"] = "google/veo-3.1-lite"
+    accepted = await clients.post(endpoint, json=body)
+    assert accepted.status_code == 201 and relayed == [True]
+    async with session_maker() as db:
+        row = (await db.execute(select(AsyncTaskRecord).where(
+            AsyncTaskRecord.task_id == "video-owned"))).scalar_one()
+    assert row.endpoint_id == "openrouter.x.google-veo-3-1-lite"
+
+
+async def test_platform_model_selector_rejects_duplicate_json_keys(
+    clients: AsyncClient, monkeypatch, openrouter_platform,
+):
+    async def must_not_relay(*args, **kwargs):
+        raise AssertionError("ambiguous model reached the provider")
+
+    monkeypatch.setattr(call_service, "relay", must_not_relay)
+    body = (b'{"model":"google/veo-3.1-lite",'
+            b'"model":"black-forest-labs/flux-3-video","prompt":"x"}')
+    response = await clients.post(
+        "/call/openrouter.x.google-veo-3-1-lite", content=body,
+        headers={"content-type": "application/json"})
+    assert response.status_code == 400
+    assert "repeats JSON field" in response.json()["detail"]
+
+
+async def test_byok_openrouter_remains_a_faithful_relay_for_model_choice(
+    clients: AsyncClient, monkeypatch, openrouter_platform,
+):
+    await clients.post("/secrets", json={"name": "openrouter", "value": "own-token"})
+    relayed = []
+
+    async def fake_relay(*args, **kwargs):
+        relayed.append(True)
+        return _response(201, {"id": "byok-video"})
+
+    monkeypatch.setattr(call_service, "relay", fake_relay)
+    response = await clients.post("/call/openrouter.x.google-veo-3-1-lite", json={
+        "model": "black-forest-labs/flux-3-video", "prompt": "A paper boat."})
+    assert response.status_code == 201 and relayed == [True]
+    async with session_maker() as db:
+        assert (await db.execute(select(AsyncTaskRecord))).scalars().all() == []
+
+
+async def test_platform_task_status_requires_same_org_submission(
+    clients: AsyncClient, monkeypatch, replicate_platform,
+):
+    submitted = await _submit(clients, monkeypatch, {
+        "id": "prediction-owned",
+        "urls": {"get": "https://api.replicate.com/v1/predictions/owned"},
+    })
+    assert submitted.status_code == 201
+    relayed = []
+
+    async def fake_status(*args, **kwargs):
+        relayed.append(True)
+        return _response(200, {"id": "prediction-owned", "status": "processing"})
+
+    monkeypatch.setattr(call_service, "relay", fake_status)
+    own = await clients.get("/call/replicate.predictions.get?id=prediction-owned")
+    assert own.status_code == 200 and relayed == [True]
+
+    unknown = await clients.get("/call/replicate.predictions.get?id=prediction-unknown")
+    assert unknown.status_code == 403 and relayed == [True]
+    assert unknown.json()["detail"]["error"] == "async_resource_not_owned"
+
+    ambiguous = await clients.get(
+        "/call/replicate.predictions.get",
+        params=[("id", "prediction-owned"), ("id", "prediction-unknown")])
+    assert ambiguous.status_code == 400 and relayed == [True]
+
+    other = await clients.post("/users", json={"email": "task-stranger@example.com"})
+    stranger = {"X-Treg-Token": other.json()["token"]}
+    denied = await clients.get(
+        "/call/replicate.predictions.get?id=prediction-owned", headers=stranger)
+    assert denied.status_code == 403 and relayed == [True]
+    assert denied.json()["detail"] == unknown.json()["detail"]
+
+
+async def test_byok_task_status_keeps_direct_provider_object_access(
+    clients: AsyncClient, monkeypatch, replicate_platform,
+):
+    await clients.post("/secrets", json={"name": "replicate", "value": "own-token"})
+
+    async def fake_status(*args, **kwargs):
+        return _response(200, {"id": "arbitrary-own-account-id", "status": "processing"})
+
+    monkeypatch.setattr(call_service, "relay", fake_status)
+    response = await clients.get(
+        "/call/replicate.predictions.get?id=arbitrary-own-account-id")
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(("start", "payload", "created", "owned_calls"), [
+    (
+        "/call/apify.web.scrape.job.start?actor_id=apify~hello-world", {},
+        {"data": {"id": "run-owned", "defaultDatasetId": "dataset-owned"}},
+        [
+            "/call/apify.web.scrape.job.status?run_id=run-owned",
+            "/call/apify.web.scrape.job.results?dataset_id=dataset-owned&limit=1",
+        ],
+    ),
+    (
+        "/call/brightdata.web.scrape.job.start?dataset_id=gd_test", [{"url": "https://example.com"}],
+        {"snapshot_id": "snapshot-owned"},
+        [
+            "/call/brightdata.web.scrape.job.status?snapshot_id=snapshot-owned",
+            "/call/brightdata.web.scrape.job.results?snapshot_id=snapshot-owned&format=json",
+        ],
+    ),
+    (
+        "/call/companyenrich.companies.enrich.bulk.start", {"domains": ["example.com"]},
+        {"job_id": "job-owned", "status": "pending"},
+        ["/call/companyenrich.companies.enrich.bulk.status?jobId=job-owned"],
+    ),
+    (
+        "/call/companyenrich.companies.search.async.start",
+        {"count": 1, "search": {"countries": ["US"]}},
+        {"job_id": "company-search-owned", "status": "pending"},
+        ["/call/companyenrich.companies.search.async.status?jobId=company-search-owned"],
+    ),
+    (
+        "/call/companyenrich.people.email.bulk.start",
+        {"items": [{"person_id": 1, "domain": "example.com"}]},
+        {"job_id": "people-email-owned", "status": "pending"},
+        ["/call/companyenrich.people.email.bulk.status?jobId=people-email-owned"],
+    ),
+    (
+        "/call/companyenrich.people.search.async.start", {"count": 1, "domains": ["example.com"]},
+        {"job_id": "people-search-owned", "status": "pending"},
+        ["/call/companyenrich.people.search.async.status?jobId=people-search-owned"],
+    ),
+    (
+        "/call/oceanio.companies.segment.create", {"domains": ["example.com"]},
+        {"segmentationId": 12345},
+        ["/call/oceanio.companies.segment.get?segmentation_id=12345"],
+    ),
+])
+async def test_legacy_platform_async_resources_are_recorded_and_authorized(
+    clients: AsyncClient, monkeypatch, legacy_async_platform,
+    start: str, payload: object, created: dict, owned_calls: list[str],
+):
+    responses = [created, {"status": "running"}, []]
+
+    async def fake_relay(*args, **kwargs):
+        return _response(200, responses.pop(0))
+
+    monkeypatch.setattr(call_service, "relay", fake_relay)
+    submitted = await clients.post(start, json=payload)
+    assert submitted.status_code == 200
+    for url in owned_calls:
+        assert (await clients.get(url)).status_code == 200
+
+    other = await clients.post("/users", json={"email": "legacy-stranger@example.com"})
+    denied = await clients.get(owned_calls[0], headers={"X-Treg-Token": other.json()["token"]})
+    assert denied.status_code == 403
+
+    async with session_maker() as db:
+        records = (await db.execute(select(AsyncResourceRecord))).scalars().all()
+    assert records
+
+
+@pytest.mark.parametrize("url", [
+    "/call/apify.web.scrape.job.status?run_id=unknown",
+    "/call/apify.web.scrape.job.results?dataset_id=unknown",
+    "/call/brightdata.web.scrape.job.status?snapshot_id=unknown",
+    "/call/brightdata.web.scrape.job.results?snapshot_id=unknown",
+    "/call/companyenrich.companies.enrich.bulk.status?jobId=unknown",
+    "/call/companyenrich.companies.search.async.status?jobId=unknown",
+    "/call/companyenrich.people.email.bulk.status?jobId=unknown",
+    "/call/companyenrich.people.search.async.status?jobId=unknown",
+    "/call/oceanio.companies.segment.get?segmentation_id=99999",
+])
+async def test_legacy_platform_async_utilities_deny_unknown_ids_before_relay(
+    clients: AsyncClient, monkeypatch, legacy_async_platform, url: str,
+):
+    async def must_not_relay(*args, **kwargs):
+        raise AssertionError("unowned async resource reached the shared provider account")
+
+    monkeypatch.setattr(call_service, "relay", must_not_relay)
+    response = await clients.get(url)
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "async_resource_not_owned"
+
+
+async def test_legacy_platform_async_mutation_denies_unknown_resource_before_relay(
+    clients: AsyncClient, monkeypatch, legacy_async_platform,
+):
+    async def must_not_relay(*args, **kwargs):
+        raise AssertionError("unowned segmentation reached the shared provider account")
+
+    monkeypatch.setattr(call_service, "relay", must_not_relay)
+    response = await clients.post(
+        "/call/oceanio.companies.segment.mark_domains?segmentation_id=99999",
+        json={"domains": ["example.com"], "type": "positive"},
+    )
+    assert response.status_code == 403
+
+
+async def test_legacy_byok_async_utility_remains_unrestricted(
+    clients: AsyncClient, monkeypatch, legacy_async_platform,
+):
+    await clients.post("/secrets", json={"name": "apify", "value": "own-token"})
+
+    async def fake_relay(*args, **kwargs):
+        return _response(200, {"data": {"id": "own-account-run"}})
+
+    monkeypatch.setattr(call_service, "relay", fake_relay)
+    response = await clients.get("/call/apify.web.scrape.job.status?run_id=arbitrary")
+    assert response.status_code == 200
+
+
+async def _submit_minimax(clients: AsyncClient, monkeypatch, task_id: str) -> str:
+    async def fake_submit(*args, **kwargs):
+        return _response(200, {"task_id": task_id, "base_resp": {"status_code": 0}})
+
+    monkeypatch.setattr(call_service, "relay", fake_submit)
+    response = await clients.post("/call/minimax.video-gen.from_text", json={
+        "model": "MiniMax-Hailuo-2.3", "prompt": "A paper boat.", "duration": 6,
+        "resolution": "768P"})
+    assert response.status_code == 200
+    return response.headers["X-Treg-Call-Id"]
+
+
+async def test_owned_terminal_poll_teaches_result_id_before_fetch(
+    clients: AsyncClient, monkeypatch, minimax_platform,
+):
+    call_id = await _submit_minimax(clients, monkeypatch, "minimax-task-owned")
+    relay_calls = []
+
+    async def fake_relay(*args, **kwargs):
+        relay_calls.append(True)
+        if len(relay_calls) == 1:
+            return _response(200, {"status": "Success", "file_id": "minimax-file-owned"})
+        return _response(200, {"file": {"download_url": "https://example.invalid/video.mp4"}})
+
+    monkeypatch.setattr(call_service, "relay", fake_relay)
+    polled = await clients.get(
+        "/call/minimax.video-gen.task.status?task_id=minimax-task-owned")
+    assert polled.status_code == 200
+    async with session_maker() as db:
+        row = await db.get(AsyncTaskRecord, call_id)
+    assert row.result_id == "minimax-file-owned"
+
+    fetched = await clients.get(
+        "/call/minimax.video-gen.result.retrieve?file_id=minimax-file-owned")
+    assert fetched.status_code == 200 and len(relay_calls) == 2
+
+    other = await clients.post("/users", json={"email": "file-stranger@example.com"})
+    denied = await clients.get(
+        "/call/minimax.video-gen.result.retrieve?file_id=minimax-file-owned",
+        headers={"X-Treg-Token": other.json()["token"]})
+    assert denied.status_code == 403 and len(relay_calls) == 2
+
+
+async def test_worker_terminal_success_persists_fetch_result_ownership(
+    clients: AsyncClient, monkeypatch, minimax_platform,
+):
+    call_id = await _submit_minimax(clients, monkeypatch, "minimax-task-worker")
+    outcome = await task_app._finish(
+        call_id, "success", {"status": "Success", "file_id": "minimax-file-worker"},
+        utcnow_naive())
+    async with session_maker() as db:
+        row = await db.get(AsyncTaskRecord, call_id)
+    assert outcome == "settled" and row.result_id == "minimax-file-worker"
 
 
 async def test_a_2xx_that_fails_the_expect_rule_releases_and_is_not_deferred(

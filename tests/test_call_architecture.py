@@ -11,7 +11,7 @@ import pytest
 
 from treg import bootstrap
 from treg.application import billing
-from treg.application.call import authorize, overflow, reserve, settle
+from treg.application.call import authorize, overflow, reserve, service, settle
 from treg.domain import money
 from treg.domain.capacity import marks as capacity_marks
 
@@ -58,6 +58,12 @@ _DATAPLANE_DERIVED_WRITES = {
         (overflow._maybe_overflow_attempt, "overflow_spend_ledger.reserve_in_transaction"),
         (overflow._release_budget, "overflow_spend_ledger.release_reservation_in_transaction"),
     ),
+    "async_result_ownership": (
+        (service._execute_call, "async_task_app.remember_result_from_poll"),
+    ),
+    "async_resource_ownership": (
+        (service._execute_call, "async_task_app.remember_platform_resources"),
+    ),
 }
 _EXPECTED_DATAPLANE_WRITES = frozenset({
     "auto_topup_task",
@@ -68,6 +74,8 @@ _EXPECTED_DATAPLANE_WRITES = frozenset({
     "capacity_exhausted_mark",
     "overflow_spend_in_settle",
     "overflow_budget_reservation",
+    "async_result_ownership",
+    "async_resource_ownership",
 })
 _DERIVED_WRITE_FILES = {
     _SRC / "application" / "billing.py": {"loop.create_task"},
@@ -83,6 +91,10 @@ _DERIVED_WRITE_FILES = {
         "capacity_marks.strike", "overflow_spend_ledger.add_in_transaction",
         "overflow_spend_ledger.reserve_in_transaction",
         "overflow_spend_ledger.release_reservation_in_transaction",
+    },
+    _SRC / "application" / "call" / "service.py": {
+        "async_task_app.remember_result_from_poll",
+        "async_task_app.remember_platform_resources",
     },
     _SRC / "domain" / "capacity" / "marks.py": {"ratestore.kv_put", "ratestore.kv_pop"},
     _SRC / "domain" / "governance" / "publicdemo.py": {
@@ -111,6 +123,10 @@ _EXPECTED_DERIVED_WRITE_SITES = {
      "overflow_spend_ledger.reserve_in_transaction"),
     ("application/call/overflow.py", "_release_budget",
      "overflow_spend_ledger.release_reservation_in_transaction"),
+    ("application/call/service.py", "_execute_call",
+     "async_task_app.remember_result_from_poll"),
+    ("application/call/service.py", "_execute_call",
+     "async_task_app.remember_platform_resources"),
     ("domain/capacity/marks.py", "strike", "ratestore.kv_put"),
     ("domain/capacity/marks.py", "clear", "ratestore.kv_pop"),
     ("domain/governance/publicdemo.py", "enforce_public_demo_ip_cap", "ratestore.rate_check"),

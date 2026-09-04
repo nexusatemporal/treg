@@ -10,10 +10,12 @@ sources:
   - src/treg/application/call/idempotency.py
   - src/treg/application/call/intake.py
   - src/treg/application/call/resolve.py
+  - src/treg/application/call/service.py
   - src/treg/application/call/reserve.py
   - src/treg/application/call/settle.py
   - src/treg/application/asynctasks.py
   - src/treg/alembic/versions/0017_async_task_record.py
+  - src/treg/alembic/versions/0018_async_resource_ownership.py
   - src/treg/application/referrals.py
   - src/treg/domain/governance/budgets.py
   - src/treg/infra/__init__.py
@@ -28,6 +30,7 @@ sources:
   - src/treg/routers/orgs.py
   - src/treg/routers/referrals.py
   - tests/test_call_architecture.py
+  - tests/test_asynctasks.py
 related:
   - architecture/catalog.md
   - architecture/proxy-model.md
@@ -82,8 +85,9 @@ Every `*_micro` value has a display-only `*_usd` twin: **never compute against t
 `Hold` (an open reservation) · `LedgerEntry` (append-only journal).
 
 `AsyncTaskRecord` is the durable owner of an existing hold after a metered asynchronous submission.
-It stores the catalog-derived settlement basis, request evidence, task id or allow-listed dynamic poll
-URL, attempts and terminal state. It does not create another money movement.
+It stores the catalog-derived settlement basis, request evidence, task id, an optional terminal
+result id or allow-listed dynamic poll URL, attempts and terminal state. It does not create another
+money movement.
 
     balance_micro == sum(block.remaining_micro) - sum(open hold.amount_micro)
 
@@ -186,6 +190,10 @@ deadline it releases the hold in full**, marks the row `timed_out` with `reconci
 an ERROR-level alert: an outcome nobody observed is the platform's cost, never the customer's, and a
 provider that silently changed its status field shows up as absorbed timeouts in
 `reconcile.async_task_settlement` (`absorbed_timeouts`) rather than as a quiet overcharge.
+Platform-key poll and fetch calls are authorized against the caller org's row before relay. A
+successful caller-driven poll may see a fetch-mode result id before the worker does, so the buffered
+terminal response records that id on the same row; the worker records it as part of settlement too.
+This makes the durable record both the hold owner and the authority for later shared-account objects.
 A 2xx that is not an accepted submission (not JSON, fails the endpoint's `expect` rule, or carries
 no task id / an off-allow-list poll URL: `application.call.service._submission_rejected`) never
 becomes a row: it settles at zero on the request path and the caller sees the body and `$0`. The
