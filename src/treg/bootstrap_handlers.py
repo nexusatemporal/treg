@@ -11,10 +11,29 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import analytics
+from .call_surface import split_call_path
+from .caller_metadata import _client_of
+from .client_identity import _norm_client
 
 
 # create_app supplies the call-specific compensation callback before registering these adapters.
-_stamp_call_exit: Any
+_stamp_call_exit: Any = None
+
+
+def _capture_call_intake_failure(request: Request, *, surface: str) -> None:
+    """Report a call-shaped request that failed before treg could resolve its caller."""
+    user_agent = request.headers.get("user-agent", "")
+    analytics.capture("treg-server", "call_intake_failed", {
+        "status_code": 503,
+        "outcome": "gateway_failed",
+        "failure_kind": "db_pool",
+        "phase": "caller_identity",
+        "surface": surface,
+        "client": _client_of(request),
+        "method": request.method,
+        "user_agent": user_agent[:100],
+        "ua_family": _norm_client(user_agent),
+    })
 
 
 async def _pool_saturated(request: Request, exc: PoolTimeoutError) -> JSONResponse:
@@ -33,12 +52,16 @@ async def _pool_saturated(request: Request, exc: PoolTimeoutError) -> JSONRespon
     # (#181) is the one a caller cannot report and `/calls` cannot show. `X-Treg-Error` stays off:
     # the typed `treg_saturated` flag above is this exit's signal, and the header is documented as
     # the HTTPException handler's (interface/api.md).
-    if request.url.path.startswith("/call/"):
-        await _stamp_call_exit(request, resp, 503)
+    if call_path := split_call_path(request.url.path):
+        if hasattr(request.state, "call_identity"):
+            await _stamp_call_exit(request, resp, 503, failure_kind="db_pool")
+        else:
+            _capture_call_intake_failure(request, surface=call_path[0])
+            await _stamp_call_exit(request, resp, 503)
     return resp
 
 async def _mark_treg_own_errors(request: Request, exc: StarletteHTTPException):
-    """Tag treg's OWN refusals on `/call/` with `X-Treg-Error`, then answer exactly as before.
+    """Tag treg's own call-surface refusals with `X-Treg-Error`, then answer as before.
 
     A caller cannot otherwise tell a treg 404 ("no tool registered for that host") from the vendor's
     own 404 — both are a status code and some JSON. The local proxy needs that distinction to explain
@@ -46,7 +69,7 @@ async def _mark_treg_own_errors(request: Request, exc: StarletteHTTPException):
     know whether to fix its request or ask an admin. The header is only ever ADDED; the status and the
     body are untouched, and a client that ignores it sees exactly what it saw before."""
     resp = await http_exception_handler(request, exc)
-    if request.url.path.startswith("/call/"):
+    if split_call_path(request.url.path):
         resp.headers["X-Treg-Error"] = "1"
         # Refusals that raised before the handler's own audit ran (bad token, unknown tool, ACL,
         # deny rule, daily cap) would otherwise leave NO row, and no id to report — the funnel's

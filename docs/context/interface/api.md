@@ -6,6 +6,7 @@ sources:
   - src/treg/api.py
   - src/treg/bootstrap_handlers.py
   - src/treg/bootstrap_http.py
+  - src/treg/call_surface.py
   - src/treg/caller_metadata.py
   - src/treg/client_identity.py
   - src/treg/application/auth.py
@@ -135,7 +136,8 @@ hold (body-less GET/HEAD only). Informational; the status and body are the provi
 
 ## `X-Treg-Error` — whose refusal is this?
 `bootstrap_handlers._mark_treg_own_errors` tags treg's **own**
-refusals on `/call/` paths with `X-Treg-Error: 1`, then answers exactly as before — the status and body
+refusals on `/call/` and `/catalog/call/` paths with `X-Treg-Error: 1`, then answers exactly as
+before — the status and body
 are untouched, and a client that ignores the header sees what it always saw. Without it a caller cannot
 tell treg's 404 ("no tool registered for that host") from the vendor's own 404: both are a status and
 some JSON. The [local proxy](../architecture/local-proxy.md) needs that distinction to explain a failure
@@ -679,7 +681,13 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   `503 {"treg_saturated": true}` + `Retry-After: 2` (`_pool_saturated`, the handler for
   `sqlalchemy.exc.TimeoutError`) rather than a 30 s wait and an anonymous 500. The adapter also calls
   `analytics.capture_fault(component="db_pool")`: saturation is a handled, typed response for the caller
-  but remains an infrastructure fault for PostHog alerting. A **platform binding** carries no `secret_id`
+  but remains an infrastructure fault for PostHog alerting. After identity resolution it also emits
+  one `tool_called` event with `outcome=gateway_failed` and `failure_kind=db_pool`. During identity
+  resolution it emits `call_intake_failed` instead, without team or target attribution and with a
+  `call` or `catalog_call` surface label. The same compensation applies to `/catalog/call/`, including
+  release of an acquired idempotency label so a retry does not get a false 409. An unexpected
+  exception raised while `call_tool` awaits `execute_call` emits `tool_called` with the same outcome
+  and `failure_kind=unexpected_exception`. A **platform binding** carries no `secret_id`
   (its value comes from settings at relay time), so secret-loading now skips `secret_id is None`. Detail
   in [proxy-model](../architecture/proxy-model.md).
   `call_catalog_endpoint` (`* /catalog/call/{rest:path}`, hidden from public OpenAPI) is the narrower
@@ -811,11 +819,13 @@ Up to 5 pairs; keys `[a-z0-9_]{1,32}`, values ≤128 chars, whole header ≤512 
 **422 before anything is relayed** (so a malformed bag costs nothing and does not burn an
 `Idempotency-Key`). Values containing `@` are refused: tags land in an append-only ledger.
 
-Every relayed response carries **`X-Treg-Call-Id`**, and so does every refusal treg raises before the
-relay, plus the saturation 503 (`_stamp_call_exit` mints it for the exits that never reach
+Every relayed response on either call surface carries **`X-Treg-Call-Id`**, and so does every refusal
+treg raises before the relay, plus the saturation 503 (`_stamp_call_exit` mints it for the exits that never reach
 `call_tool`'s own bookkeeping). The same id is written to the audit row, making it the join key for
-your own records. The one exit with no id is an **unexpected fault**: a bug that escapes `call_tool`
-is answered by Starlette itself as a bare 500 and leaves no row either.
+your own records. An unexpected fault raised by `execute_call` is answered by Starlette as a bare 500.
+The response has no id because Starlette owns it, but treg records the row and one matching
+`tool_called` event before re-raising. Failures before `execute_call`, plus body-stream failures after
+the handler returns its `StreamingResponse`, are not covered by that compensation path.
 
 Metered responses also carry `X-Treg-Cost-Micro`; a reserved call that fails before a provider answer
 carries an explicit `0`. That `0` is what the call ends up costing, but the **balance can lag it**:

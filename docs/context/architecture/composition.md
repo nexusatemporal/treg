@@ -5,6 +5,7 @@ sources:
   - src/treg/bootstrap.py
   - src/treg/bootstrap_handlers.py
   - src/treg/bootstrap_http.py
+  - src/treg/call_surface.py
   - src/treg/application/connect.py
   - src/treg/domain/identity/mcp_oauth.py
   - src/treg/domain/identity/session.py
@@ -50,11 +51,17 @@ than appearing in the role's always-running background-task manifest. The lifesp
 shutdown first unbinds it from MCP, then calls `aclose()`, which refuses new refreshes and cancels the
 shared Task before database and HTTP resources disappear.
 
-`bootstrap_handlers.py` owns the app-wide pool-saturation and HTTP-exception adapters. The composition
-root supplies the call-specific `_stamp_call_exit` callback from `routers/call.py` before registration;
-the callback owns call ids, refusal classification, audit fallback, and idempotency-label release. The
-pool adapter also sends its infrastructure exception to `analytics.capture_fault` before returning the
-typed 503; normal HTTP refusals remain responses, not server faults.
+`bootstrap_handlers.py` owns the app-wide pool-saturation and HTTP-exception adapters.
+`call_surface.split_call_path`
+classifies both `/call/` and `/catalog/call/` so those adapters share the same call-id, audit and
+idempotency-release contract while retaining `call` versus `catalog_call` ingress attribution. The
+composition root supplies the call-specific `_stamp_call_exit` callback from `routers/call.py` before registration;
+the callback owns call ids, refusal classification, audit fallback, exceptional call telemetry, and
+idempotency-label release. After caller identity exists, the pool adapter reports
+`failure_kind=db_pool` in the `tool_called` funnel. A timeout during identity resolution instead emits
+`call_intake_failed`, with no team or target attribution, so it does not change the admitted-call
+population. Both also send the infrastructure exception to `analytics.capture_fault` before returning
+the typed 503; normal HTTP refusals remain responses, not server faults.
 
 `bootstrap_http.py` owns the app-wide middleware implementations. The middleware stack is
 `_BodyDecodeMiddleware` -> `_SecurityHeadersMiddleware` ->

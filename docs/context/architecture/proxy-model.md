@@ -15,6 +15,7 @@ sources:
   - src/treg/application/call/service.py
   - src/treg/application/call/types.py
   - src/treg/client_identity.py
+  - src/treg/call_surface.py
   - src/treg/sandbox_identity.py
   - src/treg/domain/governance/access.py
   - src/treg/domain/governance/publicdemo.py
@@ -248,7 +249,8 @@ resolved Tool by then, so `_enforce_deny` takes `tool.project_id`); an org-wide-
 caught by a project rule. The three scope axes — host/path/method, member, project — are ANDed and
 each is NULL-means-any.
 
-**Whose refusal is this?** Every treg-side error on a `/call/` path carries `X-Treg-Error: 1`
+**Whose refusal is this?** Every treg-side error on the `/call/` or `/catalog/call/` surface carries
+`X-Treg-Error: 1`
 (`_mark_treg_own_errors`, see [api](../interface/api.md)) — status and body unchanged. A caller cannot
 otherwise tell treg's 404 ("no tool registered for that host") from the vendor's own; the
 [local proxy](local-proxy.md) uses the marker to explain a failure without ever rewriting a real vendor
@@ -275,6 +277,24 @@ cycle's verdict, and the event that goes out is the child's - the served status,
 counted 2,012 rescued calls among 4,455 "refusals"). Both attempts keep their DB rows on the same
 `call_ref`. When overflow does not rescue, the parent's event goes out as it was. Methods allowed:
 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS.
+
+Two treg-owned exceptional exits on either call surface join the admitted-call funnel. A database pool
+timeout after caller identity is resolved emits one unanswered `gateway_failed` event with `failure_kind=db_pool` before
+the global handler returns its typed 503. An unexpected exception raised while `call_tool` awaits
+`execute_call` emits one unanswered `gateway_failed` event with
+`failure_kind=unexpected_exception` before Starlette returns the existing bare 500. Until target
+resolution completes, `own_tool`, `provider`, and `endpoint_id` are explicitly NULL rather than
+guessing the target kind. The exit compensation checks the audit marker first, so an exception after
+an already-recorded outcome does not create a second event. Exception messages and request data are
+never analytics properties.
+
+A pool timeout during `require_member`, before caller identity exists, emits `call_intake_failed`
+instead of `tool_called`; it has no team or target fields, carries `surface=call` or
+`surface=catalog_call`, and does not pollute admitted-call or per-team metrics. Exceptions before
+`execute_call` is entered, and exceptions raised later while a
+`StreamingResponse` body is being consumed, are outside this exceptional-exit telemetry. A stream can
+fail after its status and headers have already been sent, so that lifecycle needs its own finalization
+contract rather than being relabeled as a bare 500 here.
 
 **Resolution + error hardening:** the URL-passthrough prefix match respects a **path-segment boundary**
 (`norm == base` or `base + "/"`), so `.../v1` no longer matches `.../v10/...` and inject the wrong
