@@ -5,6 +5,7 @@ sources:
   - src/treg/adsconv.py
   - src/treg/application/signup.py
   - src/treg/web/adtrack.js
+  - src/treg/web/gtag.js
 related:
   - architecture/money.md
   - architecture/multi-tenancy.md
@@ -30,14 +31,16 @@ read-side Ads catalog calls (`oauth_providers.GOOGLE_ADS`), a separate credentia
 
 ## The chain: capture → store → fire → upload
 
-1. **Capture** (`web/adtrack.js`, a first-party script, no Google tag). It reads `gclid`/`gbraid`/
+1. **Capture** (`web/adtrack.js`, a first-party script). It reads `gclid`/`gbraid`/
    `wbraid` off the URL — `gbraid`/`wbraid` are what Google substitutes on iOS traffic, and omitting
    them silently drops a large share of mobile conversions — and writes them into a `treg_ad` cookie
    (90 days, the length of Google's click-through attribution window; `SameSite=Lax` so it survives
-   the cross-site top-level navigation an ad click is). No third-party request is made from the
-   browser at any point. The cookie records the mutually-exclusive field name as well as its value
-   (`gclid|…`, `gbraid|…`, or `wbraid|…`); the old `CLICK_ID|landing` shape remains readable as a
-   legacy GCLID.
+   the cross-site top-level navigation an ad click is). The cookie records the mutually-exclusive
+   field name as well as its value (`gclid|…`, `gbraid|…`, or `wbraid|…`); the old `CLICK_ID|landing`
+   shape remains readable as a legacy GCLID. Marketing pages (landing, use-case pages, resources,
+   tutorial, catalog) also load `web/gtag.js`, which sends pageviews to Google Ads for attribution
+   modeling — this is the only browser-side Google request. The signed-in dashboard does not load
+   gtag.js.
 2. **Store** (`application.signup._ad_attribution_from`, read at both signup doors: `register_user` (`POST /users`)
    and `create_org` (`POST /orgs`), since a browser visitor who clicked an ad can land on either).
    The cookie is decoded and persisted onto the new `Org`: `ad_gclid` (the historical column name,
