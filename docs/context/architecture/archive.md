@@ -12,6 +12,7 @@ sources:
   - src/treg/api.py
   - src/treg/bootstrap.py
   - src/treg/routers/admin.py
+  - src/treg/application/asynctasks.py
 related:
   - architecture/data-model.md
   - architecture/proxy-model.md
@@ -19,6 +20,13 @@ related:
 ---
 
 # The archive
+
+Async settlement archives terminal provider JSON under `treg://asynctasks/<call_id>` using the
+original endpoint and provider. This mandatory evidence may contain expiring result URLs; the worker
+never follows those URLs and never stores generated media bytes. `load_terminal_responses((call_id, endpoint_id), …)`, which looks them up by the indexed key hash
+they were stored under and tolerates a pruned carrier,
+reads them back (newest snapshot per key, following `body_of`) for the Activity displays, which
+extract the artifact through the descriptor rather than by guessing at the provider's shape.
 
 Two concepts, one word each — the vocabulary is deliberate and mirrors the charter's discipline:
 **cache** is the newest stored answer for a key, served instead of a vendor call while it is

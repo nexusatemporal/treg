@@ -283,6 +283,57 @@ def record(
     return kh, ch
 
 
+async def store_terminal_response(
+    call_id: str, provider: str, endpoint_id: str, status_code: int, body: bytes,
+) -> None:
+    """Archive terminal task JSON under the originating call id without fetching linked media."""
+    try:
+        await asyncio.wait_for(_store(
+        method="GET", endpoint_id=endpoint_id, provider=provider,
+        url=f"treg://asynctasks/{call_id}", caller_body=b"", headers={},
+        status_code=status_code, media_type="application/json", body=body,
+        origin="async_terminal"), timeout=_STORE_TIMEOUT_S)
+    except (asyncio.TimeoutError, TimeoutError):
+        _log.warning("terminal archive recording dropped: database did not answer in %ss",
+                     _STORE_TIMEOUT_S)
+
+
+async def load_terminal_responses(tasks: list[tuple[str, str]]) -> dict[str, bytes]:
+    """The archived terminal JSON for each `(call_id, endpoint_id)` that has one. Bytes only,
+    verbatim: the caller decides how to read them. Misses are absent from the mapping, never None.
+    Looked up by the same key hash `store_terminal_response` wrote under (indexed), not by URL."""
+    if not tasks:
+        return {}
+    from sqlalchemy import select
+
+    from .infra.db import session_maker
+    from .models import ArchiveKey, ArchiveSnapshot
+
+    hashes = {cache_key("GET", endpoint_id, f"treg://asynctasks/{call_id}", b"", {}): call_id
+              for call_id, endpoint_id in tasks}
+    out: dict[str, bytes] = {}
+    async with session_maker() as s:
+        keys = (await s.execute(
+            select(ArchiveKey).where(ArchiveKey.key_hash.in_(list(hashes))))).scalars().all()
+        if not keys:
+            return out
+        by_key = {k.id: hashes[k.key_hash] for k in keys}
+        snaps = (await s.execute(
+            select(ArchiveSnapshot).where(ArchiveSnapshot.key_id.in_(list(by_key)))
+            .order_by(ArchiveSnapshot.key_id, ArchiveSnapshot.version.desc()))).scalars().all()
+        newest: dict[int, ArchiveSnapshot] = {}
+        for snap in snaps:
+            newest.setdefault(snap.key_id, snap)
+        for key_id, snap in newest.items():
+            body = snap.body
+            if body is None and snap.body_of is not None:
+                carrier = await s.get(ArchiveSnapshot, snap.body_of)
+                body = carrier.body if carrier is not None else None
+            if body is not None:
+                out[by_key[key_id]] = body
+    return out
+
+
 async def drain() -> None:
     """Flush in-flight recordings — shutdown and tests. Bounded: every task carries its own
     _STORE_TIMEOUT_S, so this cannot wait longer than the slowest permitted recording."""
@@ -400,7 +451,9 @@ async def _store_locked(
     kh = key_hash or cache_key(method, endpoint_id, url, caller_body, headers)
     ch = body_hash or content_hash(body)
     cap = get_settings().archive_max_body_bytes
-    keep_bytes = pol in _STORABLE and len(body) <= cap
+    # Terminal task JSON is mandatory settlement evidence. It contains only the provider's JSON
+    # envelope (possibly including expiring media URLs), never the media itself.
+    keep_bytes = (origin == "async_terminal" or pol in _STORABLE) and len(body) <= cap
     now = _utcnow()
 
     async with background_session_maker() as s:
