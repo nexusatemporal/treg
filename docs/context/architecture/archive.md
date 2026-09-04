@@ -293,6 +293,13 @@ their fire-and-forget task, so the caller is unaffected; the 30s bound covers wa
 stuck queue still sheds rather than wedges. Throttled, not shed: the burst test proves all 12
 concurrent recordings land while peak DB concurrency stays ≤4.
 
+The semaphore is process-local, while production runs multiple processes. Writers therefore lock
+the matching `ArchiveKey` row before reading the newest snapshot and allocating version N+1. The
+per-key Postgres row lock serializes only recordings that target the same request shape, preventing
+a unique-version collision from dropping one of their snapshots without reducing throughput for
+unrelated keys. A bounded in-process striped lock provides the equivalent guarantee on SQLite, and
+version conflicts are retried to cover the remaining first-key and multi-process SQLite race.
+
 ## Keys-endpoint weight fix (2026-09-03, the pool-pressure repeat)
 
 `/admin/archive/keys` ran one whole-row query per key, dragging every stored BODY out of the

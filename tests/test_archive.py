@@ -828,7 +828,6 @@ async def test_endpoint_stats_match_direct_aggregation(clients: AsyncClient, sha
     await clients.get(f"/call/{EP}?aweme_id=8")            # second key
     await archive.drain()
 
-    from sqlalchemy import func as F
     from treg.models import ArchiveEndpointStat
     async with session_maker() as s:
         st = (await s.execute(select(ArchiveEndpointStat)
@@ -982,3 +981,19 @@ async def test_recorder_concurrency_is_throttled(clients: AsyncClient, shadow, m
     assert peak <= archive._MAX_CONCURRENT_WRITES
     keys, _ = await _rows()
     assert len(keys) == 12                 # throttled, not shed: every recording landed
+
+
+async def test_same_key_recordings_allocate_distinct_versions(clients: AsyncClient, shadow):
+    """Concurrent writers serialize on the key before choosing the next snapshot version."""
+    import asyncio as aio
+
+    await aio.gather(*(archive._store(
+        method="GET", endpoint_id=EP, provider="tikhub",
+        url="https://api.example/same?aweme_id=7", caller_body=b"", headers={},
+        status_code=200, media_type="application/json",
+        body=b'{"writer": %d}' % i,
+    ) for i in range(12)))
+
+    keys, snaps = await _rows()
+    assert len(keys) == 1
+    assert [snap.version for snap in snaps] == list(range(1, 13))
