@@ -15,7 +15,6 @@ from ..application import auth as auth_use_cases
 from ..application import signup
 from ..application.auth import (
     CLI_APPROVE_MAX_TRIES,
-    CLI_TOKEN_TTL,
     EMAIL_CODE_TTL,
     HANDSHAKE_TTL,
     MAX_OTP_ATTEMPTS,
@@ -232,7 +231,7 @@ def _finish_oauth_login(request: Request, user: User, st: tuple | None) -> Redir
     login_id = st[0] if st is not None else None
     dest = f"/login?cli={login_id}" if login_id else "/app"
     resp = RedirectResponse(dest, status_code=302)
-    resp.set_cookie(sess.COOKIE, sess.make(user.id, token_version=user.token_version), httponly=True,
+    resp.set_cookie(sess.COOKIE, sess.make_session(user.id, token_version=user.token_version), httponly=True,
                     samesite="lax", secure=_is_https(request), max_age=sess.TTL_SECONDS)
     resp.delete_cookie("treg_oauth_state")
     return resp
@@ -1089,7 +1088,7 @@ async def auth_cli_token(
     x_treg_org: str = Header(default=""),
 ) -> dict:
     """Mint a fresh CLI/bearer token for the authenticated caller (session cookie OR token). Identity
-    tokens are stateless (`sess.make`), so handing one out rotates/invalidates nothing — it just lets
+    tokens are stateless (`sess.make_identity`), so handing one out rotates/invalidates nothing — it just lets
     the dashboard embed a working token in copy-paste snippets + a 'copy token' button, so a human
     doesn't have to hunt for it in `~/.treg/config.json`.
 

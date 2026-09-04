@@ -14,6 +14,8 @@ sources:
   - src/treg/domain/governance/usage.py
   - src/treg/domain/identity/access.py
   - src/treg/domain/identity/session.py
+  - tests/test_auth.py
+  - tests/test_token_revocation.py
   - src/treg/routers/auth.py
   - src/treg/routers/orgs.py
   - src/treg/routers/resources.py
@@ -150,7 +152,17 @@ pair, so every list/create/mutation and the proxy are scoped to the caller's org
 
 `domain.identity.access` is the shared identity/access boundary: `Caller`, token/session/org resolution,
 dependencies, role comparison, and machine classification. Session signing and validation live in
-`domain.identity.session`.
+`domain.identity.session`. Two token families share one HMAC key but newly minted credentials carry a
+signed audience: `make_session` creates `aud=session` with a required 7-day `exp`, while
+`make_identity` creates `aud=identity` and copied API keys omit `exp`. `read_session_claims` and
+`read_identity_claims` reject the other audience in both directions; `token_version` remains the
+revocation mechanism for either family.
+
+Legacy tokens predate `aud`, so the compatibility boundary follows what the signed shape can actually
+prove. An `org` claim identifies a team-pinned copied key, which remains usable after its former
+30-day `exp`; an untyped no-`exp` key is also identity-only. An untyped org-less token with `exp` is
+indistinguishable from a browser session: it works on either path only until that timestamp, and the
+bearer path refuses it once expired rather than reviving an expired cookie.
 - **Registration is shared across doors:** `application.signup.find_or_create_user(db, email)` finds a user or creates them
   — **the user ONLY, no auto personal org**. Every identity door calls
   it (GitHub / Google callbacks, email OTP), so "first proof = registration" is identical. A brand-new
@@ -175,20 +187,29 @@ dependencies, role comparison, and machine classification. Session signing and v
   `list_members`
   / `remove_member` (`GET`/`DELETE /orgs/{id}/members[/{user}]`, admin+; owners cannot be removed).
   `_require_admin_of(org_id, caller)` gates the admin endpoints (token must be for that org + role ≥ admin).
-- **An identity leaving takes its policy with it (`_drop_member_deny_rules`).** A `DenyRule` aimed at
+- **An identity leaving takes its caller-owned state with it (`delete_membership`).** A `DenyRule` aimed at
   one caller (`user_id` set) is meaningless once that caller is gone, and it lingers in the Policy
   table naming a user id nobody can resolve. `remove_member`, `leave_org` and `revoke_agent` sweep the
   rules for that `(user_id, org_id)`; `admin_delete_user` sweeps **every org's** rules for that user,
   because `DenyRule.user_id` is a foreign key and a surviving row would dangle — Postgres rejects that
   outright, while SQLite only hides it by not enforcing FKs (so the test suite alone cannot catch it).
   ORG-wide rules (`user_id` NULL) are never touched: they are about the team, not about one caller.
-  Mirrors how `delete_project` sweeps the id it deletes out of every `project_access`.
+  The same helper deletes `IdempotentCall` rows keyed to the membership before deleting it; those are
+  replay caches, not audit history, and no valid caller remains after revocation. The foreign key also
+  uses `ON DELETE CASCADE` as a database-level backstop. This closes the production failure where
+  revoking an agent that had made an idempotent paid call returned 500 and rolled its token revocation
+  back. Mirrors how `delete_project` sweeps the id it deletes out of every `project_access`.
 - **Org administration:** `set_member_role` (`PATCH /orgs/{id}/members/{user}`, **owner-only** via
   `_require_owner_of`; a `_count_owners` last-owner guard blocks demoting the sole owner — ownership
   transfer = promote another to owner, then step down), `leave_org` (`POST /orgs/{id}/leave`, self-removal,
-  same last-owner guard), `delete_org` (`DELETE /orgs/{id}`, owner-only, cascades every org-scoped row —
-  including any pending `AdConversion`, which `_ORG_SCOPED_MODELS` now lists: a queued conversion belongs
-  to the team it would be attributed to).
+  same last-owner guard), `delete_org` (`DELETE /orgs/{id}`, owner-only, cascades every org-scoped row
+  through `cascade_delete_org` / `ORG_SCOPED_MODELS` in `domain/governance/teams.py` - including any
+  pending `AdConversion`: a queued conversion belongs to the team it would be attributed to).
+  **That list is the only one.** Owner delete, admin force-delete, the landing-sandbox reaper and the
+  demo reset all go through it; `test_org_delete_clears_EVERY_org_scoped_table` walks the models module
+  for anything carrying `org_id` and also refuses a reaper that keeps a private copy. The sandbox reaper
+  did until 2026-09-02, its copy never learned about `IdempotentCall` (which references a Membership),
+  and every sandbox mint 500'd at the foreign key until it was fixed.
 - **Invites lifecycle:** one-time **and** time-bounded — `Invite.expires_at` (default `INVITE_TTL_DAYS`),
   `accept_invite` returns `410` past expiry. `list_invites` (`GET /orgs/{id}/invites`, admin+) and
   `revoke_invite` (`DELETE /orgs/{id}/invites/{invite}`, admin+); expired codes are garbage-collected by
@@ -239,6 +260,6 @@ Two consequences worth stating plainly:
 - **`TagBudget` never grows a balance column.** One org, one balance. Budgets are ceilings on a shared
   pot, not sub-accounts; per-user balances would be a second money authority and are out of scope.
 - **`TagSpend` and `TagBudget` are org-scoped** and registered in
-  `routers.orgs._ORG_SCOPED_MODELS`, `TagSpend`
+  `domain/governance/teams.py`'s `ORG_SCOPED_MODELS`, `TagSpend`
   ahead of `LedgerEntry`/`Hold` because it references them. `tests/test_orgs.py` walks the models and
   fails if a new `org_id` table is missed.

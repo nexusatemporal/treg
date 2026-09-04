@@ -13,8 +13,9 @@ sources:
   - src/treg/alembic/versions/0007_overflow_spend.py
   - src/treg/alembic/versions/0008_org_platform_overflow_disabled.py
   - src/treg/alembic/versions/0009_callrecord_hit.py
-  - src/treg/alembic/versions/0012_async_task_record.py
+  - src/treg/alembic/versions/0017_async_task_record.py
   - src/treg/alembic/versions/0011_callrecord_archive_link.py
+  - src/treg/alembic/versions/0015_idempotentcall_membership_cascade.py
   - src/treg/maintenance.py
   - src/treg/web/sitetrack.js
   - src/treg/models.py
@@ -23,6 +24,7 @@ sources:
   - src/treg/domain/referrals.py
   - src/treg/audit.py
   - src/treg/analytics.py
+  - src/treg/bootstrap_handlers.py
   - src/treg/ratestore.py
   - src/treg/application/auth.py
   - tests/test_postgres_reset.py
@@ -73,8 +75,8 @@ SQLModel tables in `src/treg/models.py`. Kept minimal on purpose. Org multi-tena
   when traffic is highest). Both feed [ads-conversions](ads-conversions.md).
 - **`User`** — a **global identity** only: `email` (unique), `is_superadmin` + `suspended` (platform
   flags, see [super-admin](super-admin.md)), `token_version` (bump to revoke every session cookie +
-  identity token this user holds — the signed token carries the `tv` it was minted at; see `sess.make`
-  / `auth_revoke_tokens`), `onboarded` (completed/skipped first-run), `demo` (a
+  identity token this user holds — the signed token carries the `tv` it was minted at; see
+  `make_session` / `make_identity` / `auth_revoke_tokens`), `onboarded` (completed/skipped first-run), `demo` (a
   fake onboarding teammate — can't log in, excluded from stats), `created_at`. (The token + role moved
   to `Membership`; a user in N orgs has N memberships.)
 - **`Membership`** — links a user to an org: `user_id`, `org_id`, `role` (owner|admin|member),
@@ -172,6 +174,11 @@ SQLModel tables in `src/treg/models.py`. Kept minimal on purpose. Org multi-tena
   Aged out to `'<expired>'` after 14 days by
   `GET /admin/errors` — not on the request path, because `get_session` never commits and a lazy
   marker written there would roll back, leaving the purge to run on every failed call.
+- **`IdempotentCall`** - a caller-scoped, 24-hour replay cache for metered successes, keyed by
+  `(membership_id, key)` and also carrying `org_id` for team cleanup. It is not an audit record: once
+  the membership is revoked there is no valid caller that can replay it. `delete_membership` removes
+  it explicitly and the `membership_id` foreign key uses `ON DELETE CASCADE` as the schema backstop
+  (Alembic `0015`), so a cached paid response can never turn token revocation into a 500.
 - **`ToolRequest`** — a "the catalog doesn't have X" report (`POST /tool-requests`, open + per-IP
   rate-limited): `capability` (the headline, ≤200 chars), `query` (the search that came up empty —
   auto-filled by agents, the dedup/priority signal), `note`, `contact`, `source` (`web` | `cli` |
@@ -312,12 +319,14 @@ payment); it queues up to `_MAX_PENDING` events (drop-newest past the bound) and
 micro-batches them (`_BATCH_MAX` per POST, at most every `_FLUSH_INTERVAL_S`) via a per-flush httpx
 client — no semaphore, because HTTP to PostHog never touches the DB pool. **Empty `posthog_key` = the
 module is off** (self-hosters and the test suite send nothing). `$groups: {team: org_slug}` mirrors the
-browser's `posthog.group('team', slug)` and `distinct_id` is the user email, so server events join the
-same PostHog person/group the SPA identifies. Emitters: `call_tool`'s `_audit` funnel (`tool_called`,
-with the catalog `provider` as vendor or the upstream host for own tools; the field list is in
-[proxy-model](proxy-model.md)), `billing_topup`
-(`topup_started`), and `billing._credit` (`topup_completed`, gated on `fresh`). Drained in the lifespan
-`finally` after `audit.drain()`. The engine adds Postgres pool
+browser's `posthog.group('team', slug)`. Attributed product events use the caller's email and team group,
+so they join the same PostHog person/group the SPA identifies. A pre-identity `call_intake_failed` event
+instead uses the fixed `treg-server` identity and no team because authentication could not obtain a DB
+connection. Emitters:
+`call_tool`'s `_audit` funnel (`tool_called`, with the catalog `provider` as vendor or the upstream host
+for own tools; the field list is in [proxy-model](proxy-model.md)), `bootstrap_handlers._pool_saturated`
+(`call_intake_failed`), `billing_topup` (`topup_started`), and `billing._credit` (`topup_completed`,
+gated on `fresh`). Drained in the lifespan `finally` after `audit.drain()`. The engine adds Postgres pool
 hygiene (`pool_pre_ping`/`pool_recycle`/sizing) for non-SQLite URLs, and `verify_db` refuses to start with
 no `TREG_SECRET_KEY` on a real DB (an ephemeral key would lose every stored secret on restart).
 
@@ -364,8 +373,8 @@ Four tables, all added with the MCP front door. See `architecture/mcp-oauth.md` 
 | `OAuthGrant` | mutable authority for one refresh family | `current_org_id` is where future tokens spend; `granted_at` is the stable consent time |
 | `OAuthRefresh` | a refresh token, **hashed** | `family_id` groups every descendant of one grant, so a replay can revoke all of them |
 
-`OAuthCode` and `OAuthRefresh` are org-scoped and therefore listed in `_ORG_SCOPED_MODELS`; `OAuthGrant`
-is cleared explicitly by `_cascade_delete_org` because its FK is intentionally named `current_org_id`.
+`OAuthCode` and `OAuthRefresh` are org-scoped and therefore listed in `ORG_SCOPED_MODELS` (`domain/governance/teams.py`); `OAuthGrant`
+is cleared explicitly by `cascade_delete_org` (in `domain/governance/teams.py`) because its FK is intentionally named `current_org_id`.
 The cascade revokes the union of families that name the deleted team through current authority or
 any historical `OAuthRefresh.org_id`: deleting only a retired provenance row would erase the replay
 evidence while leaving its live descendants usable. `OAuthClient` is not org-scoped — a client is

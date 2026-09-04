@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Column, Index, UniqueConstraint
+from sqlalchemy import BigInteger, JSON, Column, Index, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
 # Role ordering for gates (owner > admin > member > viewer).
@@ -132,7 +132,7 @@ class User(SQLModel, table=True):
     is_superadmin: bool = Field(default=False)  # cross-tenant platform admin (see /admin/*)
     suspended: bool = Field(default=False)  # suspended users cannot authenticate
     # Bumped to revoke every token this user holds at once (session cookie + CLI tokens). A signed
-    # token carries the token_version it was minted at; a mismatch = revoked (see session.make/read).
+    # Signed credentials carry the token_version they were minted at; a mismatch = revoked.
     token_version: int = Field(default=0)
     onboarded: bool = Field(default=False)  # has completed OR skipped first-run onboarding (don't re-offer)
     demo: bool = Field(default=False)  # a fake teammate seeded into a demo team (can't log in; excluded from stats)
@@ -222,6 +222,17 @@ class CallRecord(SQLModel, table=True):
     """Audit: who called which tool, in which org, when, with what result. Written off the
     request path (fire-and-forget) so it never adds latency to a proxied call.
     """
+
+    # Partial index: the archive report counts cached=true rows (twice per refresh) over the
+    # biggest table in the database — without this it is two full scans per panel poll (measured
+    # 78s on prod at 425k archive keys, 2026-09-03). Partial because hits are a sliver of rows.
+    __table_args__ = (Index("ix_callrecord_cached_true", "cached",
+                            postgresql_where=text("cached"), sqlite_where=text("cached")),
+                      # The panel's per-endpoint event feed: "this endpoint's newest 30 calls".
+                      # Without the pair, the planner walked the WHOLE table backward via the
+                      # primary key, testing endpoint_id row by row — measured 7.5s per click on
+                      # prod (2026-09-03). With it, the same question is a 30-row index read.
+                      Index("ix_callrecord_endpoint_id_id", "endpoint_id", "id"),)
 
     id: int | None = Field(default=None, primary_key=True)
     org_id: int | None = Field(default=None, foreign_key="org.id", index=True)
@@ -1022,11 +1033,11 @@ class IdempotentCall(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("membership_id", "key", name="uq_idem_caller_key"),)
 
     id: int | None = Field(default=None, primary_key=True)
-    # org_id is kept alongside the caller so the row is still org-scoped for deletion and audit:
-    # a membership can go away while the team remains, and the stored answer belongs to the team
-    # that paid for it.
+    # org_id is kept alongside the caller so the row is still org-scoped for deletion and audit.
+    # The response cache cannot outlive its caller: once a membership is revoked nobody can replay
+    # its key, so the membership foreign key cascades instead of blocking token revocation.
     org_id: int = Field(foreign_key="org.id", index=True)
-    membership_id: int = Field(foreign_key="membership.id", index=True)
+    membership_id: int = Field(foreign_key="membership.id", ondelete="CASCADE", index=True)
     key: str = Field(index=True)
     request_fingerprint: str = Field(default="")
     endpoint_id: str = Field(default="")
@@ -1269,6 +1280,9 @@ class ArchiveSnapshot(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("key_id", "version", name="uq_archive_snapshot_version"),
         Index("ix_archive_snapshot_content", "content_hash"),
+        # Partial index for the report's "refreshes today" count — only refresh-origin rows.
+        Index("ix_archivesnapshot_refresh_fetched", "fetched_at",
+              postgresql_where=text("origin = 'refresh'"), sqlite_where=text("origin = 'refresh'")),
     )
 
     id: int | None = Field(default=None, primary_key=True)
@@ -1283,3 +1297,27 @@ class ArchiveSnapshot(SQLModel, table=True):
     fetched_at: datetime = Field(default_factory=_now, index=True)
     # Who triggered the fetch: "caller" (a real request) | "refresh" (worker) | "sample" (learner).
     origin: str = Field(default="caller")
+    # How `body` is stored on disk: NULL = raw bytes (all rows before 0014), "zlib" = compressed.
+    # Readers unpack; size_bytes and content_hash always describe the RAW bytes. Declared LAST to
+    # match the migration's ALTER TABLE append position.
+    enc: str | None = Field(default=None)
+
+
+
+class ArchiveEndpointStat(SQLModel, table=True):
+    """The archive report's running totals, one row per endpoint — maintained by the recorder in
+    the SAME transaction as each snapshot, so the panel reads 50 tiny rows instead of walking
+    434k keys + 505k snapshots (measured 9.9s + 8.0s + 14.8s per report on prod, 2026-09-03).
+    Counters move only via atomic column arithmetic (col = col + n): the credit-block drift
+    taught us what read-modify-write does under parallel settles."""
+
+    endpoint_id: str = Field(primary_key=True)
+    provider: str = Field(default="")
+    policy: str = Field(default="forbidden")       # the policy last observed for this endpoint
+    keys: int = Field(default=0)                   # distinct questions ever seen
+    stable: int = Field(default=0)                 # refetches whose stripped answer matched
+    changed: int = Field(default=0)                # refetches whose stripped answer differed
+    snapshots: int = Field(default=0)              # versions stored (bodies + dedup references)
+    bodies_kept: int = Field(default=0)            # versions whose bytes were kept
+    kept_bytes: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default="0"))  # already past int32 on prod
+    newest_fetch: datetime | None = Field(default=None)

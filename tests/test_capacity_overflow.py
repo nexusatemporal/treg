@@ -25,6 +25,7 @@ from treg.domain.capacity.view import view as capacity_view
 from treg.models import Hold, LedgerEntry, OverflowRoute, OverflowSpend
 from treg.timeutil import utcnow_naive
 
+from test_capacity_overflow_routes import APOLLO_OUT_OF_CREDITS, APOLLO_VALIDATION
 from test_marketplace_call import EP, EP_MICRO, EP_PATH, _balance, _fake_relay, platform_on  # noqa: F401
 
 VENDOR_BODY = {"data": {"comments": [{"id": "1", "text": "hashed"}], "cursor": 20}}
@@ -40,11 +41,12 @@ def overflow_on(monkeypatch, platform_on):
     get_settings.cache_clear()
 
 
-async def _route(aggregator="orthogonal", price_micro=3_000, enabled=True):
+async def _route(aggregator="orthogonal", price_micro=3_000, enabled=True, *, endpoint_id=EP, provider="tikhub",
+                 method="GET", path=EP_PATH, ratio=3.0):
     async with session_maker() as db:
-        db.add(OverflowRoute(endpoint_id=EP, aggregator=aggregator, provider="tikhub", method="GET", path=EP_PATH,
-                             agg_slug="tikhub", agg_path=EP_PATH, agg_price_micro=price_micro, agg_unit="call",
-                             ratio=3.0, enabled=enabled, last_verified_at=utcnow_naive()))
+        db.add(OverflowRoute(endpoint_id=endpoint_id, aggregator=aggregator, provider=provider, method=method, path=path,
+                             agg_slug=provider, agg_path=path, agg_price_micro=price_micro, agg_unit="call",
+                             ratio=ratio, enabled=enabled, last_verified_at=utcnow_naive()))
         await db.commit()
     routes_view.invalidate()
     capacity_view.invalidate()
@@ -474,3 +476,188 @@ async def test_child_with_no_reported_cost_settles_at_the_aggregator_reserve(
     assert response.headers["X-Treg-Cost-Micro"] == "3000"
     assert before - await _balance(clients) == 3_000
     assert 3_000 != EP_MICRO, "the fixture must price the aggregator differently from direct"
+
+
+# --- Apollo: "out of credits" is a 422, not a 402 (ops/capacity.md, 2026-09-01) --------------
+
+APOLLO_EP = "apollo.people.enrich"           # POST /people/match, 1 credit = $0.026 per hit
+APOLLO_PATH = "/people/match"
+APOLLO_PERSON = {"person": {"id": "p1", "name": "hashed", "email": "hashed"}, "request_id": 1}
+
+
+async def test_apollo_out_of_credits_422_on_tier4_overflows_through_orthogonal(clients: AsyncClient, overflow_on, monkeypatch):
+    await _route(endpoint_id=APOLLO_EP, provider="apollo", method="POST", path=APOLLO_PATH, price_micro=10_000, ratio=0.38)
+    monkeypatch.setattr(call_service, "relay", _fake_relay(422, APOLLO_OUT_OF_CREDITS))
+    seen = []
+    envelope = {"success": True, "data": APOLLO_PERSON, "priceCents": 1.0, "requestId": "run_a",
+                "billing": {"chargedPriceCents": 1.0}}
+    monkeypatch.setattr(O, "_send", _orthogonal([(200, envelope)], seen))
+    before = await _balance(clients)
+    r = await clients.post(f"/call/{APOLLO_EP}", json={"email": "hashed@example.com"})
+    assert r.status_code == 200, r.text
+    assert r.json() == APOLLO_PERSON and r.headers["X-Treg-Served-Via"] == "overflow:orthogonal"
+    assert r.headers["X-Treg-Cost-Micro"] == "10000" and before - await _balance(clients) == 10_000
+    assert len(seen) == 1 and seen[0].json["api"] == "apollo" and seen[0].json["path"] == APOLLO_PATH
+    assert seen[0].json["body"] == {"email": "hashed@example.com"}, "the caller's own request, relayed"
+    assert await _holds() == []
+    await audit.drain()
+    mine = [x for x in (await clients.get("/calls")).json() if x["tool_name"] == APOLLO_EP]
+    assert {x.get("credential_tier") for x in mine} == {"platform", "platform-overflow"}
+    async with session_maker() as db:
+        lock = Lock.from_json(await ratestore.kv_get(db, LOCK_NS, "apollo"))
+    assert lock.strikes == 1 and not lock.is_active(), "the 422 was read as OUR account running dry: a strike, not the caller's mistake"
+
+
+APOLLO_SEARCH = "apollo.companies.search"      # POST /mixed_companies/search, per_call: a 4xx is normally billable
+APOLLO_SEARCH_PATH = "/mixed_companies/search"
+
+
+async def test_apollo_out_of_credits_on_a_per_call_endpoint_is_never_billed_to_the_caller(clients: AsyncClient, platform_on, monkeypatch):
+    """`per_call` bills a 422 as the caller's input error. Not this one: the table says it is OUR
+    account, so the hold is released, and the caller pays nothing for treg's empty pool."""
+    monkeypatch.setattr(call_service, "relay", _fake_relay(422, APOLLO_OUT_OF_CREDITS))
+    before = await _balance(clients)
+    r = await clients.post(f"/call/{APOLLO_SEARCH}", json={"q_organization_name": "x"})
+    assert r.status_code == 422 and r.content == APOLLO_OUT_OF_CREDITS
+    assert await _balance(clients) == before and await _holds() == []
+    entries = [e for e in await _rows(LedgerEntry) if e.kind != "grant"]
+    assert sorted(e.kind for e in entries) == ["release", "reserve"]
+    assert next(e for e in entries if e.kind == "release").meta.get("reason") == "capacity_balance"
+
+
+async def test_apollo_out_of_credits_on_a_per_call_endpoint_pays_the_aggregator_once(clients: AsyncClient, overflow_on, monkeypatch):
+    await _route(endpoint_id=APOLLO_SEARCH, provider="apollo", method="POST", path=APOLLO_SEARCH_PATH, price_micro=10_000, ratio=0.38)
+    monkeypatch.setattr(call_service, "relay", _fake_relay(422, APOLLO_OUT_OF_CREDITS))
+    seen = []
+    envelope = {"success": True, "data": {"organizations": [{"id": "o1"}]}, "priceCents": 1.0, "requestId": "run_b",
+                "billing": {"chargedPriceCents": 1.0}}
+    monkeypatch.setattr(O, "_send", _orthogonal([(200, envelope)], seen))
+    before = await _balance(clients)
+    r = await clients.post(f"/call/{APOLLO_SEARCH}", json={"q_organization_name": "x"})
+    assert r.status_code == 200 and r.headers["X-Treg-Served-Via"] == "overflow:orthogonal"
+    assert before - await _balance(clients) == 10_000, "the aggregator's price once; the parent 422 was released, not settled"
+    parent = r.headers["X-Treg-Call-Id"]
+    kinds = sorted((e.kind, e.call_id or "") for e in await _rows(LedgerEntry) if e.kind != "grant")
+    assert kinds == sorted([("reserve", parent), ("release", parent), ("reserve", f"{parent}:overflow"), ("settle", f"{parent}:overflow")])
+
+
+async def test_aggregator_relaying_the_vendors_own_out_of_credits_dialect_is_the_aggregators_dry_account(
+        clients: AsyncClient, overflow_on, monkeypatch):
+    """Orthogonal's Apollo account can be empty too, and Apollo says so with a 422, not a 402. The
+    child is released (never billed at the aggregator's price for a request no vendor served), the
+    aggregator is marked unhealthy, and the caller gets the typed 503 - not a 422 served 'via'."""
+    await _route(endpoint_id=APOLLO_SEARCH, provider="apollo", method="POST", path=APOLLO_SEARCH_PATH, price_micro=10_000, ratio=0.38)
+    monkeypatch.setattr(call_service, "relay", _fake_relay(422, APOLLO_OUT_OF_CREDITS))
+    seen = []
+    relayed = {"success": False, "error": "Upstream returned status 422", "data": json.loads(APOLLO_OUT_OF_CREDITS),
+               "priceCents": 1.0, "requestId": "run_c"}
+    monkeypatch.setattr(O, "_send", _orthogonal([(422, relayed)], seen))
+    before = await _balance(clients)
+    r = await clients.post(f"/call/{APOLLO_SEARCH}", json={"q_organization_name": "x"})
+    assert r.status_code == 503 and r.json()["detail"]["error"] == "provider_capacity_unavailable", r.text
+    assert await _balance(clients) == before and await _holds() == []
+    assert {e.kind for e in await _rows(LedgerEntry) if e.kind != "grant"} == {"reserve", "release"}
+    async with session_maker() as db:
+        lock = Lock.from_json(await ratestore.kv_get(db, LOCK_NS, "overflow:orthogonal:apollo"))
+        whole = await ratestore.kv_get(db, LOCK_NS, "overflow:orthogonal")
+    assert lock.is_active(), "the aggregator's own Apollo account is dry: skip it for a while"
+    assert whole is None, "for Apollo only - hunter and lusha still overflow through Orthogonal"
+    # ...and the next Apollo call honours the mark: Orthogonal is not contacted, the only route
+    # is out, so the vendor's own (unbilled) answer stands
+    again = []
+    monkeypatch.setattr(O, "_send", _orthogonal([], again))
+    r2 = await clients.post(f"/call/{APOLLO_SEARCH}", json={"q_organization_name": "x"})
+    assert r2.status_code == 422 and again == [] and "X-Treg-Served-Via" not in r2.headers
+
+
+async def test_a_vendors_period_quota_through_the_aggregator_is_that_vendors_answer_not_an_aggregator_outage(
+        clients: AsyncClient, overflow_on, monkeypatch):
+    """Apollo's daily cap on Orthogonal's Apollo account: the aggregator is dry for APOLLO. The
+    child is released and Apollo skips Orthogonal for a while; hunter, lusha and everyone else
+    keep overflowing through it."""
+    await _route(endpoint_id=APOLLO_SEARCH, provider="apollo", method="POST", path=APOLLO_SEARCH_PATH, price_micro=10_000, ratio=0.38)
+    monkeypatch.setattr(call_service, "relay", _fake_relay(422, APOLLO_OUT_OF_CREDITS))
+    relayed = {"success": False, "error": "Upstream returned status 429",
+               "data": {"error": "You have exceeded the rate limit per day"}, "priceCents": 0}
+    monkeypatch.setattr(O, "_send", _orthogonal([(429, relayed)], []))
+    before = await _balance(clients)
+    r = await clients.post(f"/call/{APOLLO_SEARCH}", json={"q_organization_name": "x"})
+    assert r.status_code == 503 and await _balance(clients) == before
+    async with session_maker() as db:
+        whole = await ratestore.kv_get(db, LOCK_NS, "overflow:orthogonal")
+        mine = Lock.from_json(await ratestore.kv_get(db, LOCK_NS, "overflow:orthogonal:apollo"))
+    assert whole is None and mine.is_active(), "one vendor's quota is not the aggregator's outage"
+
+
+async def test_apollo_validation_422_is_the_callers_and_never_overflows(clients: AsyncClient, overflow_on, monkeypatch):
+    await _route(endpoint_id=APOLLO_EP, provider="apollo", method="POST", path=APOLLO_PATH, price_micro=10_000, ratio=0.38)
+    monkeypatch.setattr(call_service, "relay", _fake_relay(422, APOLLO_VALIDATION))
+    seen = []
+    monkeypatch.setattr(O, "_send", _orthogonal([], seen))
+    r = await clients.post(f"/call/{APOLLO_EP}", json={})
+    assert r.status_code == 422 and r.content == APOLLO_VALIDATION and seen == [], "relayed verbatim, no aggregator contacted"
+    assert "X-Treg-Served-Via" not in r.headers
+# --- the dashboard sees what the caller got -----------------------------------------------------
+
+async def _exhausted(provider: str = "tikhub") -> None:
+    from datetime import timedelta
+    now = utcnow_naive()
+    async with session_maker() as db:
+        await ratestore.kv_put(db, STATE_NS, provider, LatestState(
+            provider, 0.0, "USD", now, "exact", exhausted_until=now + timedelta(hours=1), health="exhausted").to_json(), ttl_s=3600)
+        await db.commit()
+    capacity_view.invalidate()
+
+
+async def test_a_call_rescued_by_overflow_is_one_ok_event_not_a_refusal(clients: AsyncClient, overflow_on, monkeypatch, posthog_events):
+    """Skip-direct: the resolver knew the account was dry and went straight to the aggregator. The
+    caller got a 200; the dashboard used to see a 503 refused_by=capacity and nothing else."""
+    await _route(price_micro=3_000)
+    await _exhausted()
+    monkeypatch.setattr(O, "_send", _orthogonal([(200, {"success": True, "data": VENDOR_BODY, "priceCents": 0.3})], []))
+    r = await clients.get(f"/call/{EP}?aweme_id=7")
+    assert r.status_code == 200 and r.headers["X-Treg-Served-Via"] == "overflow:orthogonal"
+    (e,) = await posthog_events()
+    p = e["properties"]
+    assert p["status_code"] == 200 and p["outcome"] == "ok" and p["refused_by"] is None
+    assert p["tier"] == "platform-overflow" and p["served_via"] == "overflow:orthogonal"
+    assert p["charged_micro"] == 3_000 and p["call_ref"] == r.headers["X-Treg-Call-Id"]
+    await audit.drain()
+    rows = [x for x in (await clients.get("/calls")).json() if x["tool_name"] == EP]
+    assert {x.get("credential_tier") for x in rows} == {"platform", "platform-overflow"}, "both DB rows stay"
+
+
+async def test_a_call_overflow_could_not_rescue_is_still_one_refusal_event(clients: AsyncClient, overflow_on, monkeypatch, posthog_events):
+    await _route(price_micro=3_000)
+    await _exhausted()
+    monkeypatch.setattr(O, "_send", _orthogonal([(402, {"success": False, "error": "insufficient balance"})], []))
+    r = await clients.get(f"/call/{EP}?aweme_id=7")
+    assert r.status_code == 503
+    (e,) = await posthog_events()
+    p = e["properties"]
+    assert p["status_code"] == 503 and p["outcome"] == "treg_refused" and p["refused_by"] == "capacity"
+    assert "served_via" not in p
+
+
+async def test_a_vendor_402_rescued_by_overflow_is_one_ok_event(clients: AsyncClient, overflow_on, monkeypatch, posthog_events):
+    """The post-failure path: the vendor answered 402, the child served. One event, the child's."""
+    await _route(price_micro=3_000)
+    monkeypatch.setattr(call_service, "relay", _fake_relay(402, b'{"detail":"Insufficient balance"}'))
+    monkeypatch.setattr(O, "_send", _orthogonal([(200, {"success": True, "data": VENDOR_BODY, "priceCents": 0.3})], []))
+    r = await clients.get(f"/call/{EP}?aweme_id=7")
+    assert r.status_code == 200
+    (e,) = await posthog_events()
+    p = e["properties"]
+    assert p["status_code"] == 200 and p["outcome"] == "ok" and p["tier"] == "platform-overflow"
+    assert p["served_via"] == "overflow:orthogonal" and p["capacity_signal"] == "balance", "the strike is still on the event"
+
+
+async def test_a_vendor_402_overflow_did_not_rescue_keeps_the_vendor_error_event(clients: AsyncClient, overflow_on, monkeypatch, posthog_events):
+    await _route(price_micro=3_000)
+    monkeypatch.setattr(call_service, "relay", _fake_relay(402, b'{"detail":"nope"}'))
+    monkeypatch.setattr(O, "_send", _orthogonal([(400, {"success": False, "error": "x", "_orthogonal": {"error": "orthogonal_endpoint_contract", "message": "missing"}})], []))
+    r = await clients.get(f"/call/{EP}?aweme_id=7")
+    assert r.status_code == 402
+    (e,) = await posthog_events()
+    p = e["properties"]
+    assert p["status_code"] == 402 and p["outcome"] == "vendor_error" and p["tier"] == "platform" and "served_via" not in p

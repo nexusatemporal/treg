@@ -15,6 +15,7 @@ sources:
   - src/treg/application/call/service.py
   - src/treg/application/call/types.py
   - src/treg/client_identity.py
+  - src/treg/call_surface.py
   - src/treg/sandbox_identity.py
   - src/treg/domain/governance/access.py
   - src/treg/domain/governance/publicdemo.py
@@ -248,7 +249,8 @@ resolved Tool by then, so `_enforce_deny` takes `tool.project_id`); an org-wide-
 caught by a project rule. The three scope axes — host/path/method, member, project — are ANDed and
 each is NULL-means-any.
 
-**Whose refusal is this?** Every treg-side error on a `/call/` path carries `X-Treg-Error: 1`
+**Whose refusal is this?** Every treg-side error on the `/call/` or `/catalog/call/` surface carries
+`X-Treg-Error: 1`
 (`_mark_treg_own_errors`, see [api](../interface/api.md)) — status and body unchanged. A caller cannot
 otherwise tell treg's 404 ("no tool registered for that host") from the vendor's own; the
 [local proxy](local-proxy.md) uses the marker to explain a failure without ever rewriting a real vendor
@@ -267,7 +269,32 @@ produced the status (`treg_refused` / `gateway_failed` / `vendor_error` / `ok`),
 refusals never sum into a vendor's line; `refused_by`, `call_ref` (the join key to `callrecord`),
 `cached`, `smoothed`, `hit`, `response_bytes`, `capacity_signal` (the signature table's kind, catalog
 calls only) and the caller's `user_agent` / `ua_family`, which is what the vendor's edge saw because
-relay forwards it verbatim. Methods allowed: GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS.
+relay forwards it verbatim. **One event per request, and it says what the caller got:** when overflow
+rescues a call, the parent's event is held back (`_audit(..., defer_analytics=True)`) until the child
+cycle's verdict, and the event that goes out is the child's - the served status, `outcome=ok`,
+`tier=platform-overflow`, `served_via=overflow:<aggregator>`, the aggregator's price - never a
+`refused_by=capacity` 503 or the vendor's 4xx for a request that was answered (one night's dashboard
+counted 2,012 rescued calls among 4,455 "refusals"). Both attempts keep their DB rows on the same
+`call_ref`. When overflow does not rescue, the parent's event goes out as it was. Methods allowed:
+GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS.
+
+Two treg-owned exceptional exits on either call surface join the admitted-call funnel. A database pool
+timeout after caller identity is resolved emits one unanswered `gateway_failed` event with `failure_kind=db_pool` before
+the global handler returns its typed 503. An unexpected exception raised while `call_tool` awaits
+`execute_call` emits one unanswered `gateway_failed` event with
+`failure_kind=unexpected_exception` before Starlette returns the existing bare 500. Until target
+resolution completes, `own_tool`, `provider`, and `endpoint_id` are explicitly NULL rather than
+guessing the target kind. The exit compensation checks the audit marker first, so an exception after
+an already-recorded outcome does not create a second event. Exception messages and request data are
+never analytics properties.
+
+A pool timeout during `require_member`, before caller identity exists, emits `call_intake_failed`
+instead of `tool_called`; it has no team or target fields, carries `surface=call` or
+`surface=catalog_call`, and does not pollute admitted-call or per-team metrics. Exceptions before
+`execute_call` is entered, and exceptions raised later while a
+`StreamingResponse` body is being consumed, are outside this exceptional-exit telemetry. A stream can
+fail after its status and headers have already been sent, so that lifecycle needs its own finalization
+contract rather than being relabeled as a bare 500 here.
 
 **Resolution + error hardening:** the URL-passthrough prefix match respects a **path-segment boundary**
 (`norm == base` or `base + "/"`), so `.../v1` no longer matches `.../v10/...` and inject the wrong
@@ -346,6 +373,10 @@ other team. The kind rides the `tool_called` event as `capacity_signal`. Tiers 1
 and never consult the view: an org's own key running dry is the org's own answer, relayed
 unchanged. The vendor's 402 on THIS call is also relayed unchanged - the protection is for the
 next caller.
+An `unrecorded` signal - a 4xx no row matched whose body still names credits/quota/balance -
+is neither a strike nor a mark: it logs `unrecorded capacity-looking …` with the phrase and rides
+`tool_called` as `capacity_signal=unrecorded`, the tripwire for a vendor whose out-of-credit answer is
+not in the table yet (how Apollo's 422 went unseen on 2026-09-01).
 
 ## Burst smoothing on treg's own keys (plan step D′)
 
@@ -402,9 +433,12 @@ When the resolver already knows the account is out (the exhausted view) **and** 
 ladder skips the direct attempt entirely (`MarketplaceCall.skip_direct`): no parent hold, no vendor
 402, straight to the child — the plan's tier 4b.
 
-**An aggregator failure is data.** Its own 401/402/403 (or a vendor 402 relayed through it — seen live)
-releases the child hold, marks `overflow:<name>` unhealthy for 15 minutes, and answers the typed
-`provider_capacity` 503 with alternatives; a second aggregator is never tried on the same call. Its
+**An aggregator failure is data.** Its own 401/402/403 or a malformed envelope releases the child
+hold and marks `overflow:<name>` unhealthy for everyone; a relayed vendor answer the signature table
+reads as that vendor's own out-of-credit or quota dialect (`VENDOR_DRY`: a 402, Apollo's 422 through
+Orthogonal's dry Apollo account, a period 429) releases the child hold and marks
+`overflow:<name>:<provider>` only - one vendor's cap never takes the others offline. Either mark
+lasts 15 minutes, and the caller gets the typed `provider_capacity` 503 with alternatives; a second aggregator is never tried on the same call. Its
 stricter-schema refusal (`contract`) releases the child and lets the vendor's own answer stand.
 
 **Shadow mode** (`TREG_OVERFLOW_MODE=shadow`): the aggregator is called, status / shape / cost logged

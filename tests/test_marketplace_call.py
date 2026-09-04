@@ -47,6 +47,7 @@ PLATFORM_KEYS = {  # never a real key: a test that leaked one into an assertion 
     "SCRAPECREATORS": "PLATFORM-SC-KEY",
     "DATAFORSEO": "PLATFORM-DFS-KEY",
     "BRIGHTDATA": "PLATFORM-BD-KEY",
+    "APOLLO": "PLATFORM-APOLLO-KEY",
 }
 
 
@@ -55,7 +56,7 @@ def platform_on(monkeypatch):
     """Turn tier 4 on the way a deploy does: keys in the environment AND the provider allow-listed."""
     for name, value in PLATFORM_KEYS.items():
         monkeypatch.setenv(f"TREG_PLATFORM_KEY_{name}", value)
-    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "tikhub,scrapecreators,dataforseo,brightdata")
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", ",".join(k.lower() for k in PLATFORM_KEYS))
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -996,10 +997,10 @@ async def test_one_caller_cannot_reuse_a_key_twice(clients: AsyncClient):
 async def test_deleting_a_team_takes_its_remembered_answers(clients: AsyncClient):
     """A stored response belongs to the team that paid for it. Left behind it is a dangling row
     holding someone's data after they asked to be gone."""
-    from treg.routers.orgs import _ORG_SCOPED_MODELS
+    from treg.domain.governance.teams import ORG_SCOPED_MODELS
     from treg.models import IdempotentCall
 
-    assert IdempotentCall in _ORG_SCOPED_MODELS
+    assert IdempotentCall in ORG_SCOPED_MODELS
 
 
 # ---- idempotency step 2: the lookup and replay (storage still off) ---------------------------

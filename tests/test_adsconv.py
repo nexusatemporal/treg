@@ -266,6 +266,13 @@ async def test_adtrack_script_is_empty_when_disabled(clients, ads_disabled):
     assert r.text == ""
 
 
+async def test_gtag_script_is_empty_when_disabled(clients, ads_disabled):
+    """gtag.js returns empty when ads tracking is disabled, same as adtrack.js."""
+    r = await clients.get("/gtag.js")
+    assert r.status_code == 200
+    assert r.text == ""
+
+
 async def test_signup_queues_a_conversion_when_attributed(clients, ads_enabled):
     r = await clients.post("/users", json={"email": "conv@example.com"},
                               cookies={"treg_ad": "CLICK_SIGNUP|p1"})

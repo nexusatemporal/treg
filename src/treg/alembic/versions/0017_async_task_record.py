@@ -1,7 +1,7 @@
 """Async task records for deferred settlement.
 
-Revision ID: 0012
-Revises: 0011
+Revision ID: 0017
+Revises: 0016
 Create Date: 2026-09-02
 
 This is an expand-only table addition. It ships with the request/worker behavior because old code
@@ -14,8 +14,8 @@ import sqlalchemy as sa
 import sqlmodel
 
 
-revision: str = "0012"
-down_revision: str | Sequence[str] | None = "0011"
+revision: str = "0017"
+down_revision: str | Sequence[str] | None = "0016"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

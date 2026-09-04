@@ -108,6 +108,7 @@ _CONTROL_ROUTE_KEYS: frozenset[RouteKey] = frozenset({
     ('/privacy', ('GET',), 'privacy_page'),
     ('/connectors/claude', ('GET',), 'claude_connector_page'),
     ('/adtrack.js', ('GET',), 'adtrack_js'),
+    ('/gtag.js', ('GET',), 'gtag_js'),
     ('/resources', ('GET',), 'resources_page'),
     ('/grokbot', ('GET',), 'grokbot_page'),
     ('/fable', ('GET',), 'fable_page'),
@@ -435,6 +436,13 @@ def _lifespan(role: AppRole):
             if ROLE_BACKGROUND_TASKS[role] and archive.worker_enabled()
             else None
         )
+        # The pruner (profit-shaped shelf clearing — see archive.prune_once): runs wherever the
+        # archive records, bounded per pass; archive_prune_batch=0 disables it.
+        prune_task = (
+            asyncio.create_task(archive.prune_worker())
+            if ROLE_BACKGROUND_TASKS[role] and archive.prune_enabled()
+            else None
+        )
         endpoint_observations = app.state.endpoint_observation_reader
         routed_call.configure_endpoint_observation_reader(endpoint_observations)
         mcp_reader_bound = role != "control" and _mcp is not None
@@ -456,6 +464,8 @@ def _lifespan(role: AppRole):
                     ads_task.cancel()
                 if archive_task is not None:
                     archive_task.cancel()
+                if prune_task is not None:
+                    prune_task.cancel()
                 if mcp_reader_bound:
                     _mcp.clear_endpoint_observation_reader(endpoint_observations)
                 routed_call.clear_endpoint_observation_reader(endpoint_observations)
