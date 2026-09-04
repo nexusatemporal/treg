@@ -46,6 +46,27 @@ def test_session_sign_roundtrip_tamper_expiry():
     assert sess.read(sess.make(1, ttl=-1)) is None  # expired
 
 
+def test_identity_tokens_never_expire_but_sessions_still_do():
+    """The copyable API key must not die by the clock. Bearer verification (`enforce_exp=False`)
+    accepts a token whose old 30-day `exp` has passed — the keys already handed out at launch — and
+    one minted with no `exp` at all (the new default). The session-cookie path keeps enforcing: an
+    expired cookie is out, and an exp-less identity token pasted as a cookie is NOT a permanent login."""
+    stale = sess.make(9, ttl=-1)                      # a launch-era key, past its 30 days
+    assert sess.read_claims(stale) is None            # as a cookie: expired
+    assert sess.read_claims(stale, enforce_exp=False) == {"uid": 9, "tv": 0, "exp": stale_exp(stale)}
+    forever = sess.make(9, ttl=None, token_version=3, org="acme")
+    assert sess.read_claims(forever) is None          # as a cookie: no exp → not a session
+    got = sess.read_claims(forever, enforce_exp=False)
+    assert got == {"uid": 9, "tv": 3, "org": "acme"} and "exp" not in got
+    assert sess.read(forever + "x") is None           # signature still covers everything
+
+
+def stale_exp(token: str) -> int:
+    import base64, json
+    p = token.split(".", 1)[0]
+    return int(json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["exp"])
+
+
 def test_token_can_carry_an_org_claim_statelessly():
     """A team-pinned identity token: same stateless HMAC, plus an `org` slug. Omitting org keeps the
     plain shape (backward-compatible); passing it round-trips — and the signature still covers it, so

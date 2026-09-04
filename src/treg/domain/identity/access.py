@@ -110,8 +110,10 @@ async def require_identity(
 
 async def _user_from_identity_token(token: str, db: AsyncSession) -> User | None:
     """A signed identity token (from `treg login`) — same format as the session cookie, sent as a
-    bearer by the CLI. Returns the user if valid + not suspended."""
-    claims = sess.read_claims(token)
+    bearer by the CLI. Returns the user if valid + not suspended. `exp` is deliberately NOT enforced:
+    an API key lives until `token_version` is bumped, and keys minted under the old 30-day TTL must
+    keep working past it."""
+    claims = sess.read_claims(token, enforce_exp=False)
     if claims is None:
         return None
     user = await db.get(User, claims["uid"])
@@ -145,7 +147,7 @@ async def require_member(
         # MCP server's Authorization. The header still overrides, so one token can act on another team
         # when the caller can set it (the CLI does). Only the token owner could sign it, so trusting
         # its own org claim grants nothing they could not already reach.
-        org_ref = x_treg_org or ((sess.read_claims(x_treg_token) or {}).get("org", "") if x_treg_token else "")
+        org_ref = x_treg_org or ((sess.read_claims(x_treg_token, enforce_exp=False) or {}).get("org", "") if x_treg_token else "")
         org = await _resolve_org(org_ref, db)
         if org is None:
             raise HTTPException(status_code=400, detail="choose an org (send X-Treg-Org)")

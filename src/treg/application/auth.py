@@ -41,7 +41,8 @@ from ..timeutil import utcnow_naive as _utcnow_naive
 from . import signup
 
 
-CLI_TOKEN_TTL = 30 * 24 * 3600      # identity token lifetime for the CLI
+CLI_TOKEN_TTL = None  # identity tokens never expire (revoked via token_version) — was 30 days, which
+                      # killed every signup's copied key a month in; sess.read_claims(enforce_exp=False)
 EMAIL_CODE_TTL = 10 * 60  # seconds a code stays valid
 MAX_OTP_ATTEMPTS = 5  # invalidate a code after this many wrong guesses (brute-force guard)
 OTP_NS = "otp"

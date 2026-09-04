@@ -465,7 +465,11 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   pinning to `application.auth.issue_cli_token`; the dashboard embeds the fresh **identity token** in
   copy-paste snippets and its "copy token" button. Signed sessions and identity tokens carry a **`tv`
   (token_version)** claim bound to the user row (`sess.make`/`read_claims`, checked in `_user_from_session`
-  / `_user_from_identity_token`); `auth_revoke_tokens` (`POST /auth/revoke-tokens`, `require_identity`)
+  / `_user_from_identity_token`). **Identity tokens never expire**: `CLI_TOKEN_TTL = None` mints them
+  with no `exp` claim, and the bearer path reads them with `read_claims(enforce_exp=False)` — which also
+  keeps every key minted under the old 30-day TTL working past it. Only the session-cookie path enforces
+  `exp` (and requires one), so an exp-less key pasted as a cookie is not a permanent browser login.
+  Revocation is `token_version`, never the clock. `auth_revoke_tokens` (`POST /auth/revoke-tokens`, `require_identity`)
   delegates to `application.auth.revoke_identity_tokens`, which bumps `User.token_version` and invalidates
   every token that user holds at once; this kill switch keeps the account active and
   affects only that user; it re-issues a fresh cookie + token so the caller stays signed in. A token with

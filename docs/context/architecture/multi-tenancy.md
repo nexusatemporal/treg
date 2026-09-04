@@ -150,7 +150,10 @@ pair, so every list/create/mutation and the proxy are scoped to the caller's org
 
 `domain.identity.access` is the shared identity/access boundary: `Caller`, token/session/org resolution,
 dependencies, role comparison, and machine classification. Session signing and validation live in
-`domain.identity.session`.
+`domain.identity.session`. Two token shapes share one HMAC format: a **session cookie** (7-day `exp`,
+enforced) and an **identity token** (the copyable API key — no `exp`, never expires; `read_claims(
+enforce_exp=False)` on the bearer path, so launch-era keys minted with a 30-day `exp` outlive it too).
+Both die only on a `token_version` bump.
 - **Registration is shared across doors:** `application.signup.find_or_create_user(db, email)` finds a user or creates them
   — **the user ONLY, no auto personal org**. Every identity door calls
   it (GitHub / Google callbacks, email OTP), so "first proof = registration" is identical. A brand-new

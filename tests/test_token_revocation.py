@@ -77,3 +77,23 @@ def test_legacy_token_without_tv_claim_defaults_to_zero():
     legacy = f"{sess._b64(raw)}.{sess._b64(sig)}"
     claims = sess.read_claims(legacy)
     assert claims == {"uid": 7, "exp": 9999999999, "tv": 0}
+
+
+async def test_launch_era_key_past_its_30_days_still_authenticates(client):
+    """Keys minted before this change carry `exp = mint + 30d`. The bearer path ignores `exp`, so a
+    key whose 30 days have passed keeps working (only a token_version bump kills it); a new key has
+    no `exp`; and neither one — nor an expired cookie — opens a browser session."""
+    tok = await _otp_login(client, "early@x.io")
+    uid = sess.read_claims(tok, enforce_exp=False)["uid"]
+    assert "exp" not in sess.read_claims(tok, enforce_exp=False)  # new keys: no expiry claim
+
+    stale = sess.make(uid, ttl=-1)  # what the launch cohort holds, one month on
+    assert (await client.get("/invites/mine", headers={"X-Treg-Token": stale})).status_code == 200
+    # as a browser session both are refused: the stale one is expired, the new one has no bound
+    for cookie in (stale, tok):
+        client.cookies.set("treg_session", cookie)
+        assert (await client.get("/invites/mine")).status_code == 401
+        client.cookies.clear()
+    # revocation is still the kill switch for a permanent key
+    assert (await client.post("/auth/revoke-tokens", headers={"X-Treg-Token": stale})).status_code == 200
+    assert (await client.get("/invites/mine", headers={"X-Treg-Token": stale})).status_code == 401

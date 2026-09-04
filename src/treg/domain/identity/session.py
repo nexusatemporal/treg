@@ -41,7 +41,7 @@ def _unb64(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def make(user_id: int, ttl: int = TTL_SECONDS, token_version: int = 0,
+def make(user_id: int, ttl: int | None = TTL_SECONDS, token_version: int = 0,
          org: str | None = None) -> str:
     # `tv` binds the token to the user's current token_version; bumping that row invalidates every
     # token minted at an older version (see api._revoke path). Callers pass user.token_version.
@@ -51,7 +51,14 @@ def make(user_id: int, ttl: int = TTL_SECONDS, token_version: int = 0,
     # (an MCP server's Authorization header). Omitted → today's org-less token, unchanged. Baking the
     # slug in costs nothing to store and needs no rotation, because the whole token is re-derivable
     # from (uid, tv, org) — the same reason the org-less one can be re-minted on every dashboard load.
-    claims = {"uid": user_id, "exp": int(time.time()) + ttl, "tv": token_version}
+    #
+    # `ttl=None` omits `exp` entirely: an identity token (the copyable "API key") has no expiry. It
+    # is revoked by bumping token_version, never by the clock — a key that silently dies 30 days
+    # after signup is the worst possible surprise for an agent nobody is watching. Cookies always
+    # pass a ttl (see `read_claims(enforce_exp=True)`), so an exp-less claim can never be a session.
+    claims = {"uid": user_id, "tv": token_version}
+    if ttl is not None:
+        claims["exp"] = int(time.time()) + ttl
     if org:
         claims["org"] = org
     raw = json.dumps(claims, separators=(",", ":")).encode()
@@ -59,11 +66,17 @@ def make(user_id: int, ttl: int = TTL_SECONDS, token_version: int = 0,
     return f"{_b64(raw)}.{_b64(sig)}"
 
 
-def read_claims(cookie: str) -> dict | None:
-    """Return the token's claims ({uid, exp, tv, org?}) if validly signed and unexpired, else None.
+def read_claims(cookie: str, *, enforce_exp: bool = True) -> dict | None:
+    """Return the token's claims ({uid, exp?, tv, org?}) if validly signed, else None.
     `tv` defaults to 0 for tokens minted before token_version existed, so old tokens stay valid
     against a user whose token_version is still 0 (no forced logout on deploy). `org` is present only
-    on a team-pinned identity token (see `make`); absent for a plain one."""
+    on a team-pinned identity token (see `make`); absent for a plain one.
+
+    `enforce_exp=True` (the session-cookie path) requires a present, future `exp`: a browser session
+    must be time-bounded, and an exp-less identity token pasted as a cookie must not become a
+    permanent login. `enforce_exp=False` (the `X-Treg-Token` bearer path) ignores `exp` altogether —
+    including on tokens minted with the old 30-day claim, which is what makes every key already
+    handed out permanent without anyone re-copying it. Revocation is `tv`, not the clock."""
     if not cookie or "." not in cookie:
         return None
     try:
@@ -73,9 +86,11 @@ def read_claims(cookie: str) -> dict | None:
         if not hmac.compare_digest(_unb64(s), expected):
             return None
         data = json.loads(raw)
-        if int(data.get("exp", 0)) < time.time():
+        if enforce_exp and int(data.get("exp", 0)) < time.time():
             return None
-        out = {"uid": int(data["uid"]), "exp": int(data["exp"]), "tv": int(data.get("tv", 0))}
+        out = {"uid": int(data["uid"]), "tv": int(data.get("tv", 0))}
+        if data.get("exp") is not None:
+            out["exp"] = int(data["exp"])
         if data.get("org"):
             out["org"] = str(data["org"])
         return out
