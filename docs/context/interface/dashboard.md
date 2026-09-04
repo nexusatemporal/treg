@@ -130,7 +130,7 @@ Two are **session** (cookie) paths, one is a token fallback:
 - Either way the dashboard authenticates with the **cookie** (`credentials:'include'`) + picks the org
   with **`X-Treg-Org`**, detected via `/auth/me` on load. Cookie `Secure` only on HTTPS (`_is_https`).
   For copy-paste convenience it also fetches `GET /auth/cli-token` on load into `myToken` — sent WITH
-  the active-org header, so the minted identity token is **team-pinned** (`sess.make(..., org=slug)`,
+  the active-org header, so the minted identity token is **team-pinned** (`sess.make_identity(..., org=slug)`,
   a stateless `org` claim; the endpoint only pins a team the caller is a member of). That is the point:
   the "API key" then works as a **bare bearer** — pasted into an MCP server's `Authorization` header,
   where no `X-Treg-Org` can travel, it still resolves to that team (fixing the "several teams, none
@@ -164,8 +164,10 @@ empty Tools state offers `jumpToTeam()`.
 
 The session cookie is HMAC-signed with `TREG_SESSION_SECRET`/`TREG_SECRET_KEY`, falling back to a
 **random per-process key** when neither is set (never a source-visible constant — that would make
-cookies forgeable for any uid, incl. a superadmin). It also carries a **`tv` (token_version)** claim
-(`sess.make`/`read_claims`); a mismatch against `User.token_version` = revoked, so `POST
+cookies forgeable for any uid, incl. a superadmin). New cookies carry signed `aud=session` and a 7-day
+`exp`; copied API tokens carry `aud=identity` and no `exp`, so neither credential can cross into the
+other path. Both also carry a **`tv` (token_version)** claim; a mismatch against
+`User.token_version` = revoked, so `POST
 /auth/revoke-tokens` can invalidate a user's cookies + CLI tokens without rotating the shared secret. In **token mode** the dashboard carries `org_id`
 on the active org (so `activeOrgId` resolves and org-admin writes work), fetches `me` via `/auth/me`
 (so `isPersonal` + join-by-code work), and persists a newly-created org's returned token so the team is
@@ -305,8 +307,9 @@ Server side (`domain.identity.access`): `require_identity` (who, from token OR s
   labeled **"Your vault"** — Jason's explicit naming call, overriding the no-"vault" vocabulary rule) —
   two numbered **step cards** (`.start-card`):
   **① Set up your \<agent\>** — an agent dropdown (`startAgentOpen`, shares `welcome.agent` +
-  `welcomeAgents`/`welcomeMoreAgents` with the first-run modal; "Docs" links `/tutorial`) above the
-  per-agent setup line (`welcomeSetupCmd` = `buildAgentPrompt` — `set up treg — <proxy>/llms.txt with token <T>, team <slug>`; the long multi-step agent prompt is retired, llms.txt itself now carries the setup flow, the do-not-stop authorization framing and the star ask, and its money rules no longer demand per-call price confirmation) and, combined into the
+  `welcomeAgents`/`welcomeMoreAgents` with the first-run modal; "Docs" links `/tutorial`; the pick is
+  remembered in `localStorage` `treg-agent`) above an **"install the treg plugin"** link for agents whose
+  entry carries a `plugin` URL (Grok Bot) and the per-agent setup line (`welcomeSetupCmd` = `buildAgentPrompt` — `set up treg — <proxy>/llms.txt with token <T>, team <slug>`; the long multi-step agent prompt is retired, llms.txt itself now carries the setup flow, the do-not-stop authorization framing and the star ask, and its money rules no longer demand per-call price confirmation) and, combined into the
   same card, **Your API key** (`myToken`, masked with a `startTokenShow` reveal + copy — the key
   already exists, so there is no "create key" step). **② Try it out** — four copyable example
   prompts (`tryExamples`, category-labeled `.try-card`s: Social/Trends/SEO/Enrichment — concrete
@@ -341,10 +344,12 @@ Server side (`domain.identity.access`): `require_identity` (who, from token OR s
   shows a **mandatory "name your team" welcome** (`welcome.*`; team name pre-suggested from the email
   domain via `_suggestTeamName`). Step 0 is NOT dismissable — no skip, survives Escape/backdrop — the only
   action is `welcomeCreate` (`POST /orgs`, marks onboarded). Three more steps follow **inside the same
-  modal**: an **agent picker** (`welcome.step===1` — OpenClaw / Hermes Agent / Claude.ai / Claude Code /
-  Codex, plus a "More" expander with opencode / pi / Cursor / Gemini CLI / Other; LobeHub icons via
-  unpkg, theme-aware light/dark variants through `agentIcon`) with Skip/Next; the **setup block**
-  (`step===2` — "In your agent's chat, send:", the setup line + team/token as one unit —
+  modal**: an **agent picker** (`welcome.step===1` — OpenClaw / Grok Bot / Hermes Agent / Claude.ai /
+  Claude Code / Codex, plus a "More" expander with opencode / pi / Cursor / Gemini CLI / Other; LobeHub icons via
+  unpkg, theme-aware light/dark variants through `agentIcon`, except Grok Bot's bundled
+  `/logos/agents/grokbot.png`; `/app?ref=<agent-id>` from a landing preselects the card) with Skip/Next; the **setup block**
+  (`step===2` — "In your agent's chat, send:", the setup line + team/token as one unit; for a `plugin`
+  agent (Grok Bot) an "Install the treg plugin" link precedes it as step 1 and the line becomes step 2 —
   `welcomeSetupFull` copies with the real token, `welcomeSetupMasked` displays it masked behind a
   Show/Hide-key toggle) with Back/Next; and **"Try it out"** (`step===3`, wider modal — a "waiting for your agent" status line (pulsing
   `.wc-waitdot`, no 🎉), the `tryExamples` copy cards and the `tryOauth` connect chips, footer **"Skip"**

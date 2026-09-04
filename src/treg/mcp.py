@@ -403,7 +403,7 @@ async def _internal_auth(token: str) -> dict[str, str]:
         # X-Treg-Org so `_resolve_org` takes its "pinned" path instead of asking "which team?" — the
         # exact failure a multi-team user hit pasting their key into an MCP client.
         from .domain.identity import session as _session
-        pinned = (_session.read_claims(token) or {}).get("org")
+        pinned = (_session.read_identity_claims(token) or {}).get("org")
         return {"X-Treg-Token": token, "X-Treg-Org": pinned} if pinned else {"X-Treg-Token": token}
 
     from sqlmodel import select
@@ -421,8 +421,12 @@ async def _internal_auth(token: str) -> dict[str, str]:
         if org is None or org.suspended:
             return {"X-Treg-Token": token}
         slug = org.slug
-    return {"X-Treg-Token": session.make(user.id, ttl=120, token_version=user.token_version),
-            "X-Treg-Org": slug}
+    return {
+        "X-Treg-Token": session.make_identity(
+            user.id, token_version=user.token_version, ttl=120,
+        ),
+        "X-Treg-Org": slug,
+    }
 
 
 @asynccontextmanager

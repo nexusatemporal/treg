@@ -132,7 +132,7 @@ class User(SQLModel, table=True):
     is_superadmin: bool = Field(default=False)  # cross-tenant platform admin (see /admin/*)
     suspended: bool = Field(default=False)  # suspended users cannot authenticate
     # Bumped to revoke every token this user holds at once (session cookie + CLI tokens). A signed
-    # token carries the token_version it was minted at; a mismatch = revoked (see session.make/read).
+    # Signed credentials carry the token_version they were minted at; a mismatch = revoked.
     token_version: int = Field(default=0)
     onboarded: bool = Field(default=False)  # has completed OR skipped first-run onboarding (don't re-offer)
     demo: bool = Field(default=False)  # a fake teammate seeded into a demo team (can't log in; excluded from stats)

@@ -14,6 +14,8 @@ sources:
   - src/treg/domain/governance/usage.py
   - src/treg/domain/identity/access.py
   - src/treg/domain/identity/session.py
+  - tests/test_auth.py
+  - tests/test_token_revocation.py
   - src/treg/routers/auth.py
   - src/treg/routers/orgs.py
   - src/treg/routers/resources.py
@@ -150,7 +152,17 @@ pair, so every list/create/mutation and the proxy are scoped to the caller's org
 
 `domain.identity.access` is the shared identity/access boundary: `Caller`, token/session/org resolution,
 dependencies, role comparison, and machine classification. Session signing and validation live in
-`domain.identity.session`.
+`domain.identity.session`. Two token families share one HMAC key but newly minted credentials carry a
+signed audience: `make_session` creates `aud=session` with a required 7-day `exp`, while
+`make_identity` creates `aud=identity` and copied API keys omit `exp`. `read_session_claims` and
+`read_identity_claims` reject the other audience in both directions; `token_version` remains the
+revocation mechanism for either family.
+
+Legacy tokens predate `aud`, so the compatibility boundary follows what the signed shape can actually
+prove. An `org` claim identifies a team-pinned copied key, which remains usable after its former
+30-day `exp`; an untyped no-`exp` key is also identity-only. An untyped org-less token with `exp` is
+indistinguishable from a browser session: it works on either path only until that timestamp, and the
+bearer path refuses it once expired rather than reviving an expired cookie.
 - **Registration is shared across doors:** `application.signup.find_or_create_user(db, email)` finds a user or creates them
   — **the user ONLY, no auto personal org**. Every identity door calls
   it (GitHub / Google callbacks, email OTP), so "first proof = registration" is identical. A brand-new

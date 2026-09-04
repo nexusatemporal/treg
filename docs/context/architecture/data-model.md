@@ -68,8 +68,8 @@ SQLModel tables in `src/treg/models.py`. Kept minimal on purpose. Org multi-tena
   when traffic is highest). Both feed [ads-conversions](ads-conversions.md).
 - **`User`** — a **global identity** only: `email` (unique), `is_superadmin` + `suspended` (platform
   flags, see [super-admin](super-admin.md)), `token_version` (bump to revoke every session cookie +
-  identity token this user holds — the signed token carries the `tv` it was minted at; see `sess.make`
-  / `auth_revoke_tokens`), `onboarded` (completed/skipped first-run), `demo` (a
+  identity token this user holds — the signed token carries the `tv` it was minted at; see
+  `make_session` / `make_identity` / `auth_revoke_tokens`), `onboarded` (completed/skipped first-run), `demo` (a
   fake onboarding teammate — can't log in, excluded from stats), `created_at`. (The token + role moved
   to `Membership`; a user in N orgs has N memberships.)
 - **`Membership`** — links a user to an org: `user_id`, `org_id`, `role` (owner|admin|member),
