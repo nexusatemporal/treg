@@ -343,7 +343,8 @@ async def admin_reconcile_repeats(
 
 @app.get("/admin/reconcile/asynctasks")
 async def admin_reconcile_asynctasks(
-    since_days: int = 30, _: str = Depends(require_superadmin), db: AsyncSession = Depends(get_session),
+    since_days: int = 30,
+    _: str = Depends(require_superadmin), db: AsyncSession = Depends(get_admin_session),
 ) -> dict:
     """Deferred holds, absorbed timeouts, usage overruns (team paid more than reserved), block
     shortfalls (platform absorbed), and provider task outcomes."""
