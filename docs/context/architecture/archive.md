@@ -144,11 +144,19 @@ later for the timers; it complements `/admin/reconcile/repeats`, which prices wh
 Hooked in `call_tool` immediately after `_buffer_response` — the one line where "metered platform
 call, body already in memory" is a fact, which IS eligibility gate 3. Metered 2xx only; the
 `X-Treg-Cache`-style serve headers do not exist yet. `archive.record()` is fire-and-forget with
-audit's discipline: bounded pending set (512), failures swallowed with a log line, `drain()` on
-shutdown (bootstrap) and in tests. A recorder crash cannot fail a call (tested). `drain()` removes
+audit's discipline: bounded pending set (512), failures swallowed but logged at **ERROR** (a lost
+recording has to clear `FaultCaptureHandler`'s threshold to be reportable at all; degradations that
+cost nothing, like a lookup falling back to a live call, stay at WARNING), `drain()` on
+shutdown (bootstrap, **before** `analytics.drain()` so a loss during it still gets reported) and in tests. A recorder crash cannot fail a call (tested). `drain()` removes
 the tasks it gathered itself rather than waiting on their done callbacks — audit's exact drain
 discipline; the busy-spin both avoid (the 2026-08 serial-Postgres CI hang) is explained and pinned
 for both modules in `tests/test_audit.py`.
+
+**Which pool.** Every write here — `_store_locked`, `_touch_write`, `prune_once`, `refresh_once` —
+uses `background_session_maker`. `lookup` is the one exception and uses the API pool on purpose: it
+runs INSIDE a caller's `/call/`, so it must not queue behind this module's own writes.
+`tests/test_db_pool_isolation.py` pins that split per function; see also Recorder throttle below,
+which bounds concurrency inside the pool.
 
 **Counted vs kept.** Statistics and the raw-body `content_hash` are recorded for every observed
 answer (a hash is an identity, not the content); body BYTES are kept only when the entry's cache
@@ -277,7 +285,10 @@ move atomically with each strip.
 
 At most `_MAX_CONCURRENT_WRITES` (4) recordings touch the database at once — audit's exact
 loop-bound-semaphore pattern. Before it, a burst could put up to 512 concurrent short sessions in
-front of the API's 15-slot pool (SToneX's pool-pressure report). Queued recordings wait inside
+front of the API's 15-slot pool (SToneX's pool-pressure report); those writes now land on the
+BACKGROUND pool instead (`ops/deploy.md` § Three pools), so the semaphore is the inner bound rather
+than the only one — a third module reaching for the wrong maker no longer needs its author to have
+read this section. Queued recordings wait inside
 their fire-and-forget task, so the caller is unaffected; the 30s bound covers wait+write, so a
 stuck queue still sheds rather than wedges. Throttled, not shed: the burst test proves all 12
 concurrent recordings land while peak DB concurrency stays ≤4.

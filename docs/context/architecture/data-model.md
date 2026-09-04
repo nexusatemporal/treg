@@ -176,8 +176,8 @@ SQLModel tables in `src/treg/models.py`. Kept minimal on purpose. Org multi-tena
   Unmetered request bodies are cached only with a declared `Content-Length` at or below 64 KiB; failed
   streaming responses contribute only their first 8 KiB and are replayed byte-for-byte to the caller.
   Aged out to `'<expired>'` after 14 days by
-  `GET /admin/errors` — not on the request path, because `get_session` never commits and a lazy
-  marker written there would roll back, leaving the purge to run on every failed call.
+  `GET /admin/errors` — not on the request path, because `get_admin_session` never commits and a
+  lazy marker written there would roll back, leaving the purge to run on every failed call.
 - **`IdempotentCall`** - a caller-scoped, 24-hour replay cache for metered successes, keyed by
   `(membership_id, key)` and also carrying `org_id` for team cleanup. It is not an audit record: once
   the membership is revoked there is no valid caller that can replay it. `delete_membership` removes
@@ -261,18 +261,21 @@ The API builds a single-binding tool from flat fields via `_flat_binding()`; inj
 [auth-secrets](auth-secrets.md).
 
 ## Async DB (`src/treg/infra/db.py`)
-One async SQLAlchemy engine (`_engine`, Postgres pool 5 + 10 overflow per instance, `pool_timeout=5`)
-+ a public `session_maker` (the audit writer opens its own session here; so do the post-relay
-bookkeeping steps of `/call/` — the request session is committed before the relay so none of them
-ever waits on it, see [proxy-model](proxy-model.md) § Connection discipline). The public
+Three async SQLAlchemy engines against one database, declared by `POOL_SPECS` and exposed as
+`session_maker` (api), `admin_session_maker` (`/admin/*`) and `background_session_maker` (audit,
+archive writes, the ads worker) — a bulkhead, so no class of work can exhaust another's slots; sizes,
+statement timeouts and the reasoning are in [deploy](../ops/deploy.md) § Three pools. On SQLite all
+three alias one engine. The post-relay bookkeeping steps of `/call/` use `session_maker`; the request
+session is committed before the relay so none of them ever waits on it, see
+[proxy-model](proxy-model.md) § Connection discipline. The public
 `dispose_engine()` closes pooled connections before an explicit maintenance event loop exits, so a
 later server loop cannot inherit connections bound to the closed loop. `verify_db()` is the read-only
 lifespan and worker guard: it keeps the missing-Fernet-key refusal, requires a stamp at head, refuses a
 known older revision, and warns but serves on an unknown-newer revision for additive-era rollback.
-`reset_db()` is test-only: it disposes the loop-bound pool, recreates the SQLite schema or truncates
+`reset_db()` is test-only: it disposes every loop-bound pool, recreates the SQLite schema or truncates
 application tables on Postgres, then writes the Alembic head stamp. Avoiding per-test Alembic runs and
-Postgres DDL keeps the suite fast without weakening the autogenerate drift guard. `get_session()` is the FastAPI
-dependency. SQLite locally (`aiosqlite`), Postgres on Render, same code. **Timestamps are
+Postgres DDL keeps the suite fast without weakening the autogenerate drift guard. `get_session()` and
+`get_admin_session()` are the FastAPI dependencies. SQLite locally (`aiosqlite`), Postgres on Render, same code. **Timestamps are
 naive UTC:** `_now()` (the `created_at` default) drops tzinfo because the columns are `TIMESTAMP WITHOUT
 TIME ZONE` and asyncpg rejects tz-aware values on Postgres; the app compares naive UTC throughout.
 Shared request-time conversions live in `timeutil.utcnow_naive` and `timeutil.as_naive`, re-exported
@@ -330,7 +333,9 @@ connection. Emitters:
 `call_tool`'s `_audit` funnel (`tool_called`, with the catalog `provider` as vendor or the upstream host
 for own tools; the field list is in [proxy-model](proxy-model.md)), `bootstrap_handlers._pool_saturated`
 (`call_intake_failed`), `billing_topup` (`topup_started`), and `billing._credit` (`topup_completed`,
-gated on `fresh`). Drained in the lifespan `finally` after `audit.drain()`. The engine adds Postgres pool
+gated on `fresh`). Drained in the lifespan `finally` **last** — after `audit.drain()` and
+`archive.drain()`, because it is the sink those two report their losses into and draining it first
+strands those events behind a cancelled flusher. The engine adds Postgres pool
 hygiene (`pool_pre_ping`/`pool_recycle`/sizing) for non-SQLite URLs, and `verify_db` refuses to start with
 no `TREG_SECRET_KEY` on a real DB (an ephemeral key would lose every stored secret on restart).
 
@@ -341,12 +346,32 @@ value are replaced with `?[redacted]` **before truncation**, so query-injected c
 frames, locals, request bodies, and user identity are never included. `FaultCaptureHandler` mirrors ERROR+
 records while analytics is enabled; it ignores the
 `treg.analytics` logger tree, marks records to prevent duplicate root/Uvicorn delivery, and uses a
-thread-local re-entry guard plus a never-raise `emit`. `_allow_fault` applies token buckets of 10/minute
-per `(fault type, logger/site)` and 60/minute process-wide; throttled events are dropped before the shared
-queue and the next allowed event for that key carries `throttled_dropped`. The lifespan installs the
+thread-local re-entry guard plus a never-raise `emit`. The lifespan installs the
 handler on root and directly on `uvicorn.error` (Uvicorn's default parent does not propagate to root),
 then removes it after shutdown drain. `bootstrap_handlers._pool_saturated` calls `capture_fault` directly
 because its typed 503 is handled before Uvicorn would log it.
+
+**Repeats roll up; they are not rate-limited.** `_note_fault` opens one `_FaultWindow` per
+`(fault type, logger/site)` for `_FAULT_WINDOW_S`: the first occurrence is reported immediately, the rest
+are counted, and `_emit_fault_summaries` releases the count **on the flusher's timer and again in
+`drain()`** — never on the back of the next occurrence, which is how a storm that stopped (or a restart
+mid-incident) used to take its count with it. Every event carries `fault_occurrences`, the number it
+stands for, so `sum(fault_occurrences)` is the true total; PostHog's issue list counts events and is a
+lower bound. A window's payload is **fixed at construction**: PostHog fingerprints on exception type +
+value, so a summary carrying a later occurrence's message would land in a different issue from the event
+it summarises and split the sum — under-reporting for anyone filtering by issue, which is the normal way
+to read Error Tracking. The cost is that a window reports its first message, not its latest, and the
+key's other messages are counted under it. Cost is bounded by key **cardinality** (`_FAULT_MAX_KEYS`, LRU-evicted), not volume, which is
+why no global budget exists: the process-wide bucket this replaced let one loud key silence every other
+key, including first sightings that never recurred to carry their own count out. Faults are shed only when
+the shared queue is genuinely backing up (`_FAULT_QUEUE_SHARE` of `_MAX_PENDING`) — the congestion the
+throttle was ever meant to prevent, rather than a wall-clock rate that fired against an empty queue.
+
+**Losing data is ERROR, not WARNING.** `audit._write`, `audit._schedule`'s back-pressure shed, and
+`archive`'s `_store`/`_touch_write` drops all log at ERROR, because `FaultCaptureHandler` starts at ERROR:
+below it the loss reaches container stdout and nothing else, so it can neither be alerted on nor found
+without already suspecting it. Degradations that cost nothing (an archive lookup falling back to a live
+call, a retried pass) stay at WARNING — the line is whether data was actually lost.
 
 > **Tenancy:** every resource noun carries `org_id`; access is scoped to the caller's org. Details:
 > [multi-tenancy](multi-tenancy.md).
