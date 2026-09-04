@@ -6,6 +6,11 @@ client (ASGITransport routes every absolute URL to it), so the callback exchange
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import time
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -39,45 +44,66 @@ def _github_app() -> FastAPI:
 
 # ---- session signing (pure) ---------------------------------------------------------------
 def test_session_sign_roundtrip_tamper_expiry():
-    t = sess.make(42)
-    assert sess.read(t) == 42
-    assert sess.read(t + "x") is None          # tampered signature
-    assert sess.read("garbage") is None         # malformed
-    assert sess.read(sess.make(1, ttl=-1)) is None  # expired
+    t = sess.make_session(42)
+    assert sess.read_session(t) == 42
+    assert sess.read_session(t + "x") is None          # tampered signature
+    assert sess.read_session("garbage") is None         # malformed
+    assert sess.read_session(sess.make_session(1, ttl=-1)) is None  # expired
 
 
-def test_identity_tokens_never_expire_but_sessions_still_do():
-    """The copyable API key must not die by the clock. Bearer verification (`enforce_exp=False`)
-    accepts a token whose old 30-day `exp` has passed — the keys already handed out at launch — and
-    one minted with no `exp` at all (the new default). The session-cookie path keeps enforcing: an
-    expired cookie is out, and an exp-less identity token pasted as a cookie is NOT a permanent login."""
-    stale = sess.make(9, ttl=-1)                      # a launch-era key, past its 30 days
-    assert sess.read_claims(stale) is None            # as a cookie: expired
-    assert sess.read_claims(stale, enforce_exp=False) == {"uid": 9, "tv": 0, "exp": stale_exp(stale)}
-    forever = sess.make(9, ttl=None, token_version=3, org="acme")
-    assert sess.read_claims(forever) is None          # as a cookie: no exp → not a session
-    got = sess.read_claims(forever, enforce_exp=False)
-    assert got == {"uid": 9, "tv": 3, "org": "acme"} and "exp" not in got
-    assert sess.read(forever + "x") is None           # signature still covers everything
+def _legacy_token(**claims) -> str:
+    raw = json.dumps(claims, separators=(",", ":")).encode()
+    sig = hmac.new(sess._key(), raw, hashlib.sha256).digest()
+    return f"{sess._b64(raw)}.{sess._b64(sig)}"
 
 
-def stale_exp(token: str) -> int:
-    import base64, json
-    p = token.split(".", 1)[0]
-    return int(json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["exp"])
+def test_new_identity_and_session_audiences_never_cross():
+    identity = sess.make_identity(9, token_version=3, org="acme")
+    assert sess.read_identity_claims(identity) == {
+        "uid": 9, "tv": 3, "org": "acme", "aud": sess.IDENTITY_AUDIENCE,
+    }
+    assert sess.read_session_claims(identity) is None
+
+    live_session = sess.make_session(9)
+    expired_session = sess.make_session(9, ttl=-1)
+    expired_bridge_identity = sess.make_identity(9, ttl=-1)
+    assert sess.read_session_claims(live_session)["aud"] == sess.SESSION_AUDIENCE
+    assert sess.read_identity_claims(live_session) is None
+    assert sess.read_session_claims(expired_session) is None
+    assert sess.read_identity_claims(expired_session) is None
+    assert sess.read_identity_claims(expired_bridge_identity) is None
+    assert sess.read_identity_claims(identity + "x") is None  # signature covers the audience too
+
+
+def test_legacy_compatibility_stops_at_the_cryptographic_boundary():
+    """An org claim distinguishes old team-pinned copied keys. An org-less token with an ``exp``
+    could instead be a browser cookie, so bearer compatibility ends when that timestamp passes."""
+    expired = int(time.time()) - 1
+    future = int(time.time()) + 60
+    pinned = _legacy_token(uid=9, tv=0, exp=expired, org="acme")
+    stale_ambiguous = _legacy_token(uid=9, tv=0, exp=expired)
+    live_ambiguous = _legacy_token(uid=9, tv=0, exp=future)
+    pr_era_identity = _legacy_token(uid=9, tv=0)
+
+    assert sess.read_identity_claims(pinned)["org"] == "acme"
+    assert sess.read_identity_claims(stale_ambiguous) is None
+    assert sess.read_identity_claims(live_ambiguous)["uid"] == 9
+    assert sess.read_identity_claims(pr_era_identity)["uid"] == 9
+    assert sess.read_session_claims(pinned) is None
+    assert sess.read_session_claims(pr_era_identity) is None
 
 
 def test_token_can_carry_an_org_claim_statelessly():
     """A team-pinned identity token: same stateless HMAC, plus an `org` slug. Omitting org keeps the
     plain shape (backward-compatible); passing it round-trips — and the signature still covers it, so
     a tampered org is rejected like any other tampered claim."""
-    plain = sess.read_claims(sess.make(7))
-    assert plain is not None and "org" not in plain          # unchanged when no org given
-    pinned = sess.read_claims(sess.make(7, org="acme"))
+    plain = sess.read_identity_claims(sess.make_identity(7))
+    assert plain is not None and "org" not in plain
+    pinned = sess.read_identity_claims(sess.make_identity(7, org="acme"))
     assert pinned is not None and pinned["org"] == "acme" and pinned["uid"] == 7
     # tampering the payload to inject/forge an org breaks the signature
-    good = sess.make(7, org="acme")
-    assert sess.read_claims(good + "x") is None
+    good = sess.make_identity(7, org="acme")
+    assert sess.read_identity_claims(good + "x") is None
 
 
 @pytest.fixture
@@ -139,7 +165,7 @@ async def _seed(email="dev@x.dev", role="owner", superadmin=False):
 
 async def test_session_scopes_by_x_treg_org(gc):
     uid, oid, slug = await _seed()
-    gc.cookies.set("treg_session", sess.make(uid))
+    gc.cookies.set("treg_session", sess.make_session(uid))
     # no org header → 400 (must choose)
     assert (await gc.get("/tools")).status_code == 400
     # with the org header → 200, scoped to that org
@@ -153,11 +179,11 @@ async def test_session_scopes_by_x_treg_org(gc):
 
 async def test_session_superadmin_reaches_admin(gc):
     uid, _, _ = await _seed(email="root@x.dev", superadmin=True)
-    gc.cookies.set("treg_session", sess.make(uid))
+    gc.cookies.set("treg_session", sess.make_session(uid))
     assert (await gc.get("/admin/stats")).status_code == 200
     # a non-superadmin session is refused
     uid2, _, _ = await _seed(email="plain@x.dev", superadmin=False)
-    gc.cookies.set("treg_session", sess.make(uid2))
+    gc.cookies.set("treg_session", sess.make_session(uid2))
     assert (await gc.get("/admin/stats")).status_code == 403
 
 
@@ -208,7 +234,7 @@ async def test_orgs_marks_the_team_pinned_tokens_org_active(gc):
         s.add(Membership(user_id=u.id, org_id=second.id, role="owner", token_hash=crypto.hash_token("t2")))
         await s.commit()
         uid = u.id
-    pinned = sess.make(uid, org="second-team")
+    pinned = sess.make_identity(uid, org="second-team")
     r = await gc.get("/orgs", headers={"X-Treg-Token": pinned})
     assert r.status_code == 200, r.text
     assert [o["slug"] for o in r.json() if o["active"]] == ["second-team"], r.json()

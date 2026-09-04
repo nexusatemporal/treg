@@ -119,7 +119,7 @@ async def test_seed_tool_and_accept_teammate(c):
             user = User(email="builder@x.io")
             s.add(user)
             await s.commit()
-        tok = sess.make(user.id)
+        tok = sess.make_identity(user.id)
     org = (await c.post("/orgs", json={"name": "Acme"}, headers=_h(tok))).json()  # first team: identity token only, no org yet
     oh = {**_h(tok), "X-Treg-Org": org["org"]}
     # seed the tool
@@ -164,7 +164,7 @@ async def test_reset_sweeps_deny_rules_naming_a_demo_teammate(c):
         user = User(email="builder@x.io")
         s.add(user)
         await s.commit()
-    tok = sess.make(user.id)
+    tok = sess.make_identity(user.id)
     org = (await c.post("/orgs", json={"name": "Acme"}, headers=_h(tok))).json()
     oh = {**_h(tok), "X-Treg-Org": org["org"]}
     await c.post(f"/orgs/{org['org_id']}/invites", json={"email": "alex@demo.treg.local", "role": "member"}, headers=oh)

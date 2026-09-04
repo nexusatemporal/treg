@@ -2604,7 +2604,7 @@ async def dashboard(
     if not signed_in:
         owner = await _local_owner(db)
         if owner is not None:
-            resp.set_cookie(sess.COOKIE, sess.make(owner.id, token_version=owner.token_version),
+            resp.set_cookie(sess.COOKIE, sess.make_session(owner.id, token_version=owner.token_version),
                             httponly=True, samesite="lax",
                             secure=_is_https(request),
                             max_age=sess.TTL_SECONDS)

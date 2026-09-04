@@ -112,7 +112,7 @@ async def test_a_session_cookie_is_not_an_access_token():
     """treg mints session cookies and identity tokens with the same HMAC construction. Without a type
     marker one class of credential would silently validate as another — a browser session becoming an
     MCP grant, which nobody consented to."""
-    cookie = session.make(7)
+    cookie = session.make_session(7)
     assert mcp._oauth_claims(cookie) is None
     assert mcp_oauth.read_access_token(cookie, expected_audience=mcp_oauth.mcp_resource_url()) is None
 
@@ -343,7 +343,7 @@ async def _signed_in(clients, email="oauth-user@superdesign.dev"):
 
     async with session_maker() as db:
         user = (await db.execute(select(User).where(User.email == me["email"]))).scalar_one()
-        cookie = _sess.make(user.id, token_version=user.token_version)
+        cookie = _sess.make_session(user.id, token_version=user.token_version)
     clients.cookies.set("treg_session", cookie)   # on the client: httpx deprecates per-request
     return cookie, org_id
 
@@ -1053,7 +1053,7 @@ async def _as(email: str) -> dict:
 
     async with session_maker() as db:
         user = (await db.execute(select(User).where(User.email == email))).scalar_one()
-    return {"X-Treg-Token": _sess.make(user.id, token_version=user.token_version)}
+    return {"X-Treg-Token": _sess.make_identity(user.id, token_version=user.token_version)}
 
 
 async def test_the_team_on_a_grant_can_be_moved_without_reconnecting(clients):

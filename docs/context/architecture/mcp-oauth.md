@@ -12,6 +12,7 @@ sources:
   - src/treg/web/connect-demo.html
   - docs/CLAUDE-CONNECTOR-SUBMISSION.md
   - tests/test_mcp.py
+  - tests/test_mcp_oauth.py
   - tests/test_mcp_directory.py
   - tests/test_marketplace_call.py
 related:
@@ -441,10 +442,13 @@ binary creates during the rolling-deploy window.
 
 ## Tokens are exchanged, not forwarded
 
-`_internal_auth` validates an OAuth access token and presents it onward as a short-lived (120s)
-identity token for the user it names, pinned to the org on the grant. That keeps OAuth inside `mcp.py`
+`_internal_auth` validates an OAuth access token and presents it onward as a short-lived (120s), typed
+`aud=identity` token for the user it names, pinned to the org on the grant. Its explicit expiry is
+enforced even though normal copied identity keys have no expiry. That keeps OAuth inside `mcp.py`
 instead of teaching `require_member` a third token type, and it means `_resolve_org` must honour the
-pinned team rather than re-deriving it.
+pinned team rather than re-deriving it. For a native identity bearer, `_internal_auth` uses
+`read_identity_claims` to surface the signed team pin; it never interprets a typed browser session as
+a bearer.
 
 Both were found by running the flow rather than testing the pieces: `_oauth_claims` validated tokens
 perfectly while every tool still forwarded the raw bearer and got "not signed in".

@@ -463,13 +463,18 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   (`X-Treg-Token`) as well as a session cookie, so the dashboard's token door can learn its own email.
   `auth_cli_token` (`GET /auth/cli-token`, `require_identity`) delegates token minting and optional team
   pinning to `application.auth.issue_cli_token`; the dashboard embeds the fresh **identity token** in
-  copy-paste snippets and its "copy token" button. Signed sessions and identity tokens carry a **`tv`
-  (token_version)** claim bound to the user row (`sess.make`/`read_claims`, checked in `_user_from_session`
-  / `_user_from_identity_token`). **Identity tokens never expire**: `CLI_TOKEN_TTL = None` mints them
-  with no `exp` claim, and the bearer path reads them with `read_claims(enforce_exp=False)` — which also
-  keeps every key minted under the old 30-day TTL working past it. Only the session-cookie path enforces
-  `exp` (and requires one), so an exp-less key pasted as a cookie is not a permanent browser login.
-  Revocation is `token_version`, never the clock. `auth_revoke_tokens` (`POST /auth/revoke-tokens`, `require_identity`)
+  copy-paste snippets and its "copy token" button. New signed credentials carry both **`tv`
+  (token_version)** and a signed **`aud`**: `make_session` emits `aud=session` plus a required expiry;
+  `make_identity` emits `aud=identity`, with no expiry for copied API keys. `_user_from_session` uses
+  `read_session_claims` and `_user_from_identity_token` uses `read_identity_claims`, so a typed session
+  is never a bearer and a typed identity token is never a browser login. The one intentionally
+  time-bounded identity is MCP's 120-second internal OAuth exchange token; its explicit `exp` is enforced.
+
+  Legacy untyped credentials cannot be classified perfectly. A signed `org` claim proves a team-pinned
+  copied key, so those launch-era keys survive their old 30-day `exp`; an untyped no-`exp` key is also
+  identity-only. An org-less untyped token with `exp` could be either a copied key or a session cookie,
+  so compatibility lasts only until `exp` and the bearer path refuses it afterward. Revocation is
+  `token_version`, never the clock for permanent identity keys. `auth_revoke_tokens` (`POST /auth/revoke-tokens`, `require_identity`)
   delegates to `application.auth.revoke_identity_tokens`, which bumps `User.token_version` and invalidates
   every token that user holds at once; this kill switch keeps the account active and
   affects only that user; it re-issues a fresh cookie + token so the caller stays signed in. A token with

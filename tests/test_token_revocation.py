@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -70,30 +71,62 @@ async def test_revoke_requires_auth(client):
 
 
 def test_legacy_token_without_tv_claim_defaults_to_zero():
-    """A token minted before the tv claim existed has no `tv` key. read_claims must treat it as tv=0
-    so it still validates against a user whose token_version is 0 (no forced logout on deploy)."""
+    """A legacy session without ``tv`` remains valid for a user still at token_version zero."""
     raw = json.dumps({"uid": 7, "exp": 9999999999}).encode()  # note: no "tv"
     sig = hmac.new(sess._key(), raw, hashlib.sha256).digest()
     legacy = f"{sess._b64(raw)}.{sess._b64(sig)}"
-    claims = sess.read_claims(legacy)
+    claims = sess.read_session_claims(legacy)
     assert claims == {"uid": 7, "exp": 9999999999, "tv": 0}
 
 
-async def test_launch_era_key_past_its_30_days_still_authenticates(client):
-    """Keys minted before this change carry `exp = mint + 30d`. The bearer path ignores `exp`, so a
-    key whose 30 days have passed keeps working (only a token_version bump kills it); a new key has
-    no `exp`; and neither one — nor an expired cookie — opens a browser session."""
-    tok = await _otp_login(client, "early@x.io")
-    uid = sess.read_claims(tok, enforce_exp=False)["uid"]
-    assert "exp" not in sess.read_claims(tok, enforce_exp=False)  # new keys: no expiry claim
+def _legacy_token(**claims) -> str:
+    raw = json.dumps(claims, separators=(",", ":")).encode()
+    sig = hmac.new(sess._key(), raw, hashlib.sha256).digest()
+    return f"{sess._b64(raw)}.{sess._b64(sig)}"
 
-    stale = sess.make(uid, ttl=-1)  # what the launch cohort holds, one month on
-    assert (await client.get("/invites/mine", headers={"X-Treg-Token": stale})).status_code == 200
-    # as a browser session both are refused: the stale one is expired, the new one has no bound
-    for cookie in (stale, tok):
-        client.cookies.set("treg_session", cookie)
-        assert (await client.get("/invites/mine")).status_code == 401
-        client.cookies.clear()
-    # revocation is still the kill switch for a permanent key
-    assert (await client.post("/auth/revoke-tokens", headers={"X-Treg-Token": stale})).status_code == 200
-    assert (await client.get("/invites/mine", headers={"X-Treg-Token": stale})).status_code == 401
+
+async def test_typed_credentials_and_safe_legacy_boundary_end_to_end(client):
+    tok = await _otp_login(client, "early@x.io")
+    claims = sess.read_identity_claims(tok)
+    assert claims["aud"] == sess.IDENTITY_AUDIENCE and "exp" not in claims
+    uid = claims["uid"]
+
+    # New browser sessions never authenticate as bearers, even before their expiry.
+    live_session = client.cookies.get(sess.COOKIE)
+    expired_session = sess.make_session(uid, ttl=-1)
+    for cookie in (live_session, expired_session):
+        assert (await client.get(
+            "/invites/mine", headers={"X-Treg-Token": cookie},
+        )).status_code == 401
+
+    # A new identity token is not a browser session in the opposite direction either.
+    client.cookies.set(sess.COOKIE, tok)
+    assert (await client.get("/invites/mine")).status_code == 401
+
+    # A launch-era team-pinned copied key is distinguishable by its signed org claim, so it survives
+    # the old 30-day exp and still resolves the team as a bare bearer. The org-less shape is
+    # indistinguishable from an expired legacy cookie and is deliberately refused.
+    created = (await client.post(
+        "/orgs", json={"name": "Legacy Team"}, headers={"X-Treg-Token": tok},
+    )).json()
+    stale_pinned = _legacy_token(
+        uid=uid, tv=0, exp=int(time.time()) - 1, org=created["org"],
+    )
+    stale_orgless = _legacy_token(uid=uid, tv=0, exp=int(time.time()) - 1)
+    assert (await client.get(
+        "/tools", headers={"X-Treg-Token": stale_pinned},
+    )).status_code == 200
+    assert (await client.get(
+        "/invites/mine", headers={"X-Treg-Token": stale_orgless},
+    )).status_code == 401
+    assert (await client.get(
+        "/invites/mine", headers={"X-Treg-Token": stale_pinned + "x"},
+    )).status_code == 401
+
+    # token_version remains the kill switch for permanent and supported legacy identity keys.
+    assert (await client.post(
+        "/auth/revoke-tokens", headers={"X-Treg-Token": stale_pinned},
+    )).status_code == 200
+    assert (await client.get(
+        "/invites/mine", headers={"X-Treg-Token": stale_pinned},
+    )).status_code == 401

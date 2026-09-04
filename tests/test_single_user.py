@@ -118,7 +118,7 @@ async def test_the_dashboard_opens_already_signed_in(local):
     assert cookie, "local mode must attach a session so there is no login screen"
     async with session_maker() as s:
         user = (await s.execute(select(User).where(User.email == LOCAL_USER_EMAIL))).scalar_one()
-    assert sess.read_claims(cookie)["uid"] == user.id
+    assert sess.read_session_claims(cookie)["uid"] == user.id
 
 
 # ---- and the same routes must stay closed on a normal deployment ------------------------------

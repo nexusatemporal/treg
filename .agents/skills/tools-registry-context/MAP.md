@@ -255,6 +255,7 @@ Regenerate via `scripts/build-map.py`.
 | `src/treg/worker.py` | ops/capacity.md, ops/deploy.md |
 | `tests/test_alembic_expand_safety.py` | architecture/data-model.md |
 | `tests/test_app_roles.py` | architecture/composition.md |
+| `tests/test_auth.py` | architecture/multi-tenancy.md |
 | `tests/test_call_application_contract.py` | architecture/proxy-model.md |
 | `tests/test_call_architecture.py` | architecture/import-boundaries.md, architecture/money.md, architecture/proxy-model.md |
 | `tests/test_call_cancellation.py` | architecture/proxy-model.md |
@@ -271,6 +272,7 @@ Regenerate via `scripts/build-map.py`.
 | `tests/test_marketplace_call.py` | architecture/mcp-oauth.md, architecture/proxy-model.md |
 | `tests/test_mcp.py` | architecture/mcp-oauth.md |
 | `tests/test_mcp_directory.py` | architecture/mcp-oauth.md |
+| `tests/test_mcp_oauth.py` | architecture/mcp-oauth.md |
 | `tests/test_oauth_billed.py` | architecture/proxy-model.md |
 | `tests/test_oauth_refresh.py` | architecture/auth-secrets.md |
 | `tests/test_passthrough.py` | architecture/proxy-model.md |
@@ -279,6 +281,7 @@ Regenerate via `scripts/build-map.py`.
 | `tests/test_routing.py` | architecture/catalog.md |
 | `tests/test_tag_billing.py` | architecture/proxy-model.md |
 | `tests/test_tag_billing_adversarial.py` | architecture/proxy-model.md |
+| `tests/test_token_revocation.py` | architecture/multi-tenancy.md |
 
 ## Fragment → sources
 
@@ -294,9 +297,9 @@ Regenerate via `scripts/build-map.py`.
 | `architecture/instagram-oauth.md` | `catalog_ingest.py`, `access.py`, `resolve.py`, `service.py`, `instagram.yaml`, `instagram.extended.yaml`, `cli.py`, `store.py`, `authorization.py`, `oauth_flow.py`, `oauth_exchange.py`, `mcp.py`, `call.py`, `index.html`, `0010_oauth_authorization_method.py`, `test_instagram_oauth_architecture.py` |
 | `architecture/local-proxy.md` | `localproxy.py`, `server.js` |
 | `architecture/local-run.md` | `localrun.py`, `egress.py`, `fsjail.py` |
-| `architecture/mcp-oauth.md` | `auth.py`, `mcp.py`, `health.py`, `mcp_oauth.py`, `session.py`, `auth.py`, `claude-connector.html`, `connect-demo.html`, `CLAUDE-CONNECTOR-SUBMISSION.md`, `test_mcp.py`, `test_mcp_directory.py`, `test_marketplace_call.py` |
+| `architecture/mcp-oauth.md` | `auth.py`, `mcp.py`, `health.py`, `mcp_oauth.py`, `session.py`, `auth.py`, `claude-connector.html`, `connect-demo.html`, `CLAUDE-CONNECTOR-SUBMISSION.md`, `test_mcp.py`, `test_mcp_oauth.py`, `test_mcp_directory.py`, `test_marketplace_call.py` |
 | `architecture/money.md` | `__init__.py`, `models.py`, `billing.py`, `idempotency.py`, `intake.py`, `resolve.py`, `reserve.py`, `settle.py`, `referrals.py`, `budgets.py`, `__init__.py`, `stripe.py`, `reconcile.py`, `referrals.py`, `api.py`, `signup.py`, `admin.py`, `billing.py`, `call.py`, `orgs.py`, `referrals.py`, `test_call_architecture.py` |
-| `architecture/multi-tenancy.md` | `models.py`, `api.py`, `caller_metadata.py`, `auth.py`, `signup.py`, `access.py`, `budgets.py`, `publicdemo.py`, `teams.py`, `usage.py`, `access.py`, `session.py`, `auth.py`, `orgs.py`, `resources.py`, `bundles.py`, `db.py`, `test_router_dependencies.py` |
+| `architecture/multi-tenancy.md` | `models.py`, `api.py`, `caller_metadata.py`, `auth.py`, `signup.py`, `access.py`, `budgets.py`, `publicdemo.py`, `teams.py`, `usage.py`, `access.py`, `session.py`, `test_auth.py`, `test_token_revocation.py`, `auth.py`, `orgs.py`, `resources.py`, `bundles.py`, `db.py`, `test_router_dependencies.py` |
 | `architecture/proxy-model.md` | `relay.py`, `ssrf.py`, `api.py`, `authorize.py`, `idempotency.py`, `intake.py`, `resolve.py`, `reserve.py`, `settle.py`, `evidence.py`, `service.py`, `types.py`, `client_identity.py`, `sandbox_identity.py`, `access.py`, `publicdemo.py`, `usage.py`, `call.py`, `test_call_application_contract.py`, `test_call_cancellation.py`, `test_error_capture.py`, `test_marketplace_call.py`, `test_oauth_billed.py`, `test_passthrough.py`, `test_tag_billing.py`, `test_tag_billing_adversarial.py`, `test_call_architecture.py` |
 | `architecture/super-admin.md` | `api.py`, `admin.py`, `access.py`, `config.py` |
 | `foundation/charter.md` | `2026-06-30-jason-tools-registry.md`, `README.md` |
