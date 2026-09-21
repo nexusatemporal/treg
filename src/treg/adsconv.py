@@ -185,6 +185,12 @@ _CLICK_ID_FIELDS = frozenset({"gclid", "gbraid", "wbraid"})
 # Google ever does surface a duplicate-style rejection.
 _ACKNOWLEDGED_ROW_ERRORS: frozenset[str] = frozenset()
 _RETRYABLE_ROW_ERRORS = frozenset({"INTERNAL_ERROR"})
+# Description substrings (these violations carry no reason code) that mean "not yet", not "never":
+# the destination account has not clicked through the Customer Data Terms / Enhanced conversions
+# for leads switch, so every hashed-email event is refused until an operator does. Verified live
+# with validateOnly on 2026-09-21: `events.events[0].destination_references[0]: The destination
+# account hasn't agreed to the terms for enhanced conversions.` Rows must wait, not dead-letter.
+_RETRYABLE_ROW_DESCRIPTIONS = ("terms for enhanced conversions",)
 # Matches the event index out of a `google.rpc.BadRequest.FieldViolation.field` path such as
 # "events[2].userData..." or "events.events[2]...", and equally out of a `FieldWarning.fieldPath`.
 _EVENT_INDEX_RE = re.compile(r"events\[(\d+)\]")
@@ -285,7 +291,13 @@ def _payload_and_rows(
             event["currency"] = "AUD"
         events.append(event)
         payload_rows.append(row)
-    return {"destinations": destinations, "events": events, "validateOnly": False}, payload_rows
+    payload = {"destinations": destinations, "events": events, "validateOnly": False}
+    if any("userData" in e for e in events):
+        # How the hashed identifiers are encoded. REQUIRED whenever any event carries userData —
+        # Data Manager rejects the whole request with `events.encoding: Required field is missing`
+        # otherwise (validateOnly caught this live on 2026-09-21).
+        payload["encoding"] = "HEX"
+    return payload, payload_rows
 
 
 def build_payload(rows: list[AdConversion], orgs: dict[int, Org],
@@ -527,7 +539,10 @@ async def drain_once(db: AsyncSession, client) -> dict:
             codes = {code for code, _ in errors}
             detail = "; ".join(f"{code}: {message}" for code, message in errors) \
                 or f"{resp.status_code}: {resp.text[:260]}"
-            if row_errors is None or codes & _RETRYABLE_ROW_ERRORS or row.attempts < _MAX_ATTEMPTS:
+            transient = bool(codes & _RETRYABLE_ROW_ERRORS) or any(
+                needle in message.lower()
+                for _, message in errors for needle in _RETRYABLE_ROW_DESCRIPTIONS)
+            if row_errors is None or transient or row.attempts < _MAX_ATTEMPTS:
                 # A row this rejection didn't name (row_errors is None) was caught in the
                 # crossfire of a sibling's bad data — never dead-letter it on that basis alone.
                 _schedule_retry(row, now, detail)

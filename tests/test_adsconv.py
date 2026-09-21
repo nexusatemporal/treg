@@ -780,6 +780,7 @@ def test_build_payload_without_user_data_flag_carries_click_ids_only(ads_enabled
     event = adsconv.build_payload([row], {1: org}, {1: "lead@example.com"})["events"][0]
     assert event["adIdentifiers"] == {"gclid": "CLICK1"}
     assert "userData" not in event and "consent" not in event
+    assert "encoding" not in adsconv.build_payload([row], {1: org}, {1: "lead@example.com"})
 
 
 def test_build_payload_attaches_hashed_email_next_to_the_click_id(user_data_enabled):
@@ -802,8 +803,12 @@ def test_build_payload_identifies_an_unattributed_team_by_hashed_email_alone(use
     assert "adIdentifiers" not in event
     assert event["userData"]["userIdentifiers"] == [{"emailAddress": adsconv.hash_email("lead@example.com")}]
     assert payload["destinations"][0]["productDestinationId"] == "7723667017"
+    # Data Manager rejects any request carrying userData without saying how the hashes are
+    # encoded (live validateOnly, 2026-09-21); a click-only request must not carry it.
+    assert payload["encoding"] == "HEX"
     # Neither a click id nor an email: not an event.
-    assert adsconv.build_payload([row], {2: org}, {})["events"] == []
+    empty = adsconv.build_payload([row], {2: org}, {})
+    assert empty["events"] == [] and "encoding" not in empty
 
 
 async def test_queue_records_an_unattributed_signup_when_user_data_is_enabled(clients, user_data_enabled):
@@ -879,6 +884,27 @@ async def test_drain_dead_letters_a_row_with_neither_click_nor_human(clients, us
         assert fake.calls == []
         row = (await db.execute(select(AdConversion).where(AdConversion.org_id == org.id))).scalars().one()
         assert row.failed_at is not None and "no human creator email" in row.error
+
+
+async def test_terms_not_accepted_keeps_retrying_instead_of_dead_lettering(clients, user_data_enabled):
+    # Google's exact refusal (validateOnly, 2026-09-21) until an operator accepts the Customer Data
+    # Terms in the Ads UI. It is "not yet", not "never": the rows must outlive the attempt ceiling.
+    await reset_db()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://registry") as c:
+        org_id = (await c.post("/users", json={"email": "lead@example.com"})).json()["org_id"]
+    async with session_maker() as db:
+        row = (await db.execute(select(AdConversion).where(AdConversion.org_id == org_id))).scalars().one()
+        row.attempts = 50  # far past _MAX_ATTEMPTS
+        db.add(row); await db.commit()
+    refusal = _rejected(_field_violation(0, "INVALID_ARGUMENT",
+        "The destination account hasn't agreed to the terms for enhanced conversions."))
+    fake = FakeAdsClient(FakeAdsResponse(refusal, status_code=400))
+    async with session_maker() as db:
+        result = await adsconv.drain_once(db, fake)
+        assert result["retried"] == 1 and result["failed"] == 0, result
+        row = (await db.execute(select(AdConversion).where(AdConversion.org_id == org_id))).scalars().one()
+        assert row.failed_at is None and row.next_attempt_at is not None
+        assert "terms for enhanced conversions" in row.error
 
 
 # ---- the browser tag: advanced consent mode + the web signup action ------------------------------

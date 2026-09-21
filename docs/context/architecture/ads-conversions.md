@@ -116,8 +116,14 @@ with `error = "outbox row has no attributable org: no click id and no human crea
 
 **Two account-side switches gate the flag**, both UI-only (the API reads them back but cannot set
 them): the Ads account must accept the *Customer Data Terms* and enable *Enhanced conversions for
-leads* (Goals → Conversions → Settings). Until then Google rejects the identifiers and rows would
-dead-letter, which is why the flag defaults off and is flipped by an operator after the click.
+leads* (Goals → Conversions → Settings). Until then Google refuses every event that carries an
+identifier — verified live with `validateOnly` on 2026-09-21: the click-only request returns 200, and
+the same request plus `userData` returns 400 `events.events[0].destination_references[0]: The
+destination account hasn't agreed to the terms for enhanced conversions.` That description is in
+`_RETRYABLE_ROW_DESCRIPTIONS`, so rows queued before the click keep retrying (24-hour backoff cap)
+instead of dead-lettering after eight attempts. The same probe found that any request carrying
+`userData` must also carry a top-level `"encoding": "HEX"` (`events.encoding: Required field is
+missing`); `_payload_and_rows` adds it only then, so the click-only body is byte-for-byte unchanged.
 
 ## Authentication: a platform credential, not a customer's OAuth connection
 
