@@ -40,6 +40,7 @@ def usd_micro_to_aud_micro(usd_micro: int) -> int:
 
 
 import asyncio
+import hashlib
 import logging
 import re
 import time
@@ -51,7 +52,56 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from .config import get_settings
-from .models import AdConversion, Org
+from .domain.identity.access import AGENT_DOMAIN
+from .models import AdConversion, Membership, Org, User
+
+
+def user_data_enabled() -> bool:
+    """Enhanced Conversions for Leads: hashed-email identifiers ride along on every upload and
+    unattributed (no click id) teams are queued too. Requires `enabled()` — the flag alone does
+    nothing without an account to upload to."""
+    return enabled() and bool(get_settings().ads_conv_user_data)
+
+
+def normalize_email(email: str) -> str:
+    """Google's normalisation for hashed email identifiers: trim, lowercase, and for gmail.com /
+    googlemail.com drop the dots in the local part (Gmail ignores them, so `j.z@gmail.com` and
+    `jz@gmail.com` are one account and must hash to one identifier)."""
+    e = (email or "").strip().lower()
+    local, _, domain = e.rpartition("@")
+    if domain in ("gmail.com", "googlemail.com"):
+        local = local.replace(".", "")
+    return f"{local}@{domain}" if domain else e
+
+
+def hash_email(email: str) -> str:
+    """SHA-256 hex of the normalised address — the only form of an email that ever leaves treg
+    for Google. Google matches it against its own signed-in accounts; nobody can reverse it."""
+    return hashlib.sha256(normalize_email(email).encode("utf-8")).hexdigest()
+
+
+def _is_human_email(email: str) -> bool:
+    return not (email or "").strip().lower().endswith(f"@{AGENT_DOMAIN}")
+
+
+async def human_owner_emails(db: AsyncSession, org_ids: set[int]) -> dict[int, str]:
+    """The identifier Google gets for a team: its EARLIEST human member's email (the creator, by
+    membership id — the person who signed up). Agent identities (`agents.treg.local`) and demo
+    teammates never qualify: an agent's address is unroutable and cannot match anyone, and
+    uploading it would only inflate the outbox with rows Google can never attribute."""
+    if not org_ids:
+        return {}
+    rows = (await db.execute(
+        select(Membership.org_id, User.email)
+        .join(User, User.id == Membership.user_id)
+        .where(Membership.org_id.in_(org_ids), User.demo.is_(False))
+        .order_by(Membership.org_id, Membership.id)
+    )).all()
+    out: dict[int, str] = {}
+    for org_id, email in rows:
+        if org_id not in out and _is_human_email(email):
+            out[org_id] = email
+    return out
 
 
 def enabled() -> bool:
@@ -76,12 +126,20 @@ async def queue(db: AsyncSession, org: Org, action: str, *,
     queue, so the paid conversion is a second, separate commit: a known, accepted trade-off
     (2026-08-17; see `docs/context/architecture/ads-conversions.md`).
 
-    A no-op when the team has no click to attribute to, which is most teams. Duplicate fires are
-    absorbed by the unique constraint rather than checked for first — the check-then-insert race
-    is real under concurrent webhook redelivery.
+    A no-op when the team has no click to attribute to, which is most teams — UNLESS Enhanced
+    Conversions for Leads is on (`ads_conv_user_data`), in which case every team with a human
+    creator is queued and the upload identifies it by hashed email instead. Demo teams and
+    agent-only teams (no human member) are never queued. Duplicate fires are absorbed by the
+    unique constraint rather than checked for first — the check-then-insert race is real under
+    concurrent webhook redelivery.
     """
-    if not enabled() or not org.ad_gclid:
+    if not enabled() or org.id is None or org.demo or org.public_demo:
         return False
+    if not org.ad_gclid:
+        if not user_data_enabled():
+            return False
+        if org.id not in await human_owner_emails(db, {org.id}):
+            return False
     # A SAVEPOINT, not a bare flush: this runs inside the CALLER's transaction (the signup grant,
     # the Stripe credit), and a plain `db.rollback()` on the duplicate would roll back THEIR work
     # too — a redelivered webhook would undo a credit. The savepoint is deliberately HELD OPEN
@@ -146,7 +204,7 @@ def _conversion_time(dt: datetime) -> str:
 
 
 def _payload_and_rows(
-    rows: list[AdConversion], orgs: dict[int, Org]
+    rows: list[AdConversion], orgs: dict[int, Org], emails: dict[int, str] | None = None,
 ) -> tuple[dict, list[AdConversion]]:
     """Build the events:ingest request and preserve its operation-index -> outbox-row mapping.
 
@@ -157,7 +215,15 @@ def _payload_and_rows(
     mapping onto `payload_rows[index]` — `destinations` is a separate, deduped list, so it never
     disturbs that index. `drain_once` and `_partial_failure_errors` rely on that 1:1 mapping to
     attribute a rejected request back to the row that caused it.
+
+    `emails` (org id -> the creator's raw email, from `human_owner_emails`) is consulted only
+    when Enhanced Conversions for Leads is on: each event then carries the SHA-256 of the
+    normalised address as a `userData` identifier, next to the click id when there is one and
+    INSTEAD of it when there is not. A row with neither is not an event — it is skipped, and
+    `drain_once` dead-letters it as unattributable.
     """
+    with_user_data = user_data_enabled()
+    emails = emails or {}
     cid = get_settings().google_ads_customer_id
     login_cid = (get_settings().google_ads_login_customer_id or "").replace("-", "").strip()
     destinations: list[dict] = []
@@ -166,7 +232,10 @@ def _payload_and_rows(
     payload_rows = []
     for row in rows:
         org = orgs.get(row.org_id)
-        if org is None or not org.ad_gclid:
+        if org is None:
+            continue
+        email = emails.get(row.org_id) if with_user_data else None
+        if not org.ad_gclid and not email:
             continue
         click_field = org.ad_click_id_type or "gclid"  # NULL means a pre-type-migration GCLID.
         if click_field not in _CLICK_ID_FIELDS:
@@ -185,7 +254,6 @@ def _payload_and_rows(
             dest_index_by_action[row.action] = len(destinations)
             destinations.append(destination)
         event = {
-            "adIdentifiers": {click_field: org.ad_gclid},
             "eventTimestamp": _conversion_time(row.created_at),
             "eventSource": "WEB",
             "destinationReferences": [row.action],
@@ -197,6 +265,18 @@ def _payload_and_rows(
             # catch it, so only a real ingest surfaces this.
             "transactionId": f"treg-{row.id}",
         }
+        if org.ad_gclid:
+            event["adIdentifiers"] = {click_field: org.ad_gclid}
+        if email:
+            # Enhanced Conversions for Leads: the hashed address is what lets Google match this
+            # conversion to a signed-in account that saw or clicked the ad on any device. The
+            # consent block is REQUIRED for Google to use an identifier from an EEA user; treg's
+            # basis is the privacy policy every signup accepts (cookies §07 / the Google Ads row
+            # of the processors table), which names this exact disclosure. Personalisation is
+            # always denied: the hash is for measurement, never for building an audience.
+            event["userData"] = {"userIdentifiers": [{"emailAddress": hash_email(email)}]}
+            event["consent"] = {"adUserData": "CONSENT_GRANTED",
+                                "adPersonalization": "CONSENT_DENIED"}
         if row.value_usd_micro:
             # The one permitted float: conversionValue is a wire double, so a decimal amount is what
             # the JSON boundary requires. The arithmetic that produced the micro amount stayed
@@ -208,14 +288,15 @@ def _payload_and_rows(
     return {"destinations": destinations, "events": events, "validateOnly": False}, payload_rows
 
 
-def build_payload(rows: list[AdConversion], orgs: dict[int, Org]) -> dict:
+def build_payload(rows: list[AdConversion], orgs: dict[int, Org],
+                  emails: dict[int, str] | None = None) -> dict:
     """Turn outbox rows into an events:ingest body.
 
     `drain_once` retains the row mapping from `_payload_and_rows` and reads the response before
     acknowledging anything. Value is converted to the ACCOUNT's currency here, at upload time; the
     outbox stores USD so a rate change never rewrites history.
     """
-    return _payload_and_rows(rows, orgs)[0]
+    return _payload_and_rows(rows, orgs, emails)[0]
 
 
 # Module-level cache for the platform access token: ONE credential, shared by every drain, so a
@@ -364,7 +445,7 @@ def _acknowledge(row: AdConversion, now: datetime) -> None:
 async def drain_once(db: AsyncSession, client) -> dict:
     """Upload one batch of due rows. Returns a small dict for logging.
 
-    Due = not uploaded/terminal, older than the click-availability delay, and past its retry time.
+    Due = not uploaded/terminal and past its retry time.
     HTTP failures retry indefinitely with backoff. Per-row permanent failures are dead-lettered
     after `_MAX_ATTEMPTS`; they remain queryable with `failed_at` + the last Google error.
 
@@ -388,15 +469,20 @@ async def drain_once(db: AsyncSession, client) -> dict:
     )).scalars().all()
     if not rows:
         return {"sent": 0}
+    org_ids = {r.org_id for r in rows}
     orgs = {o.id: o for o in (await db.execute(
-        select(Org).where(Org.id.in_({r.org_id for r in rows})))).scalars().all()}
-    payload, payload_rows = _payload_and_rows(rows, orgs)
+        select(Org).where(Org.id.in_(org_ids)))).scalars().all()}
+    # The creator's email is resolved at UPLOAD time, not stored on the row: the outbox never
+    # holds an address (hashed or not), and a team whose human creator is later removed simply
+    # uploads without an identifier rather than carrying a stale one.
+    emails = await human_owner_emails(db, org_ids) if user_data_enabled() else {}
+    payload, payload_rows = _payload_and_rows(rows, orgs, emails)
     payload_ids = {row.id for row in payload_rows}
     skipped = [row for row in rows if row.id not in payload_ids]
     for row in skipped:
         row.attempts += 1
         row.failed_at = now
-        row.error = "outbox row has no attributable org/click id"
+        row.error = "outbox row has no attributable org: no click id and no human creator email"
         db.add(row)
     if not payload["events"]:
         await db.commit()
