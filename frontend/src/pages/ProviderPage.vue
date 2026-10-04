@@ -57,9 +57,7 @@ export default { components: { ToolDrawer, ProviderLogo, ConnectionCard }, setup
           <!-- Every tool this provider serves, by platform. A tool that is one of several providers
                doing the same thing links to that capability's comparison: from "what does my key do" to
                "who else does this, and how do they compare". -->
-          <!-- The catalog-v2 control arm (state/catalogExperiment.js) keeps the page it had: platform
-               chips in place of the tool list, whose links lead to comparison pages the ledger does not have. -->
-          <section class="pl-sec" v-if="!catalogLegacy && (mkToolShelves.length || (mkTools && mkTools.loading))">
+          <section class="pl-sec" v-if="mkToolShelves.length || (mkTools && mkTools.loading)">
             <h2 class="pl-h"><span>Tools</span><i></i><em v-if="mkToolCount">{{mkToolCount}}</em></h2>
             <p class="cat-hint">What an agent can call on {{mkProvider.display_name}}, by platform.</p>
             <div v-if="mkTools && mkTools.loading && !mkToolShelves.length" class="pl-empty">Loading…</div>
@@ -108,13 +106,5 @@ export default { components: { ToolDrawer, ProviderLogo, ConnectionCard }, setup
               </div>
             </div>
           </section>
-
-          <div class="tgroup" v-if="catalogLegacy && mkPlatforms.length">
-            <div class="tgh">Covered in the catalog <span class="tgh-n">{{mkPlatforms.length}}</span>
-              <span class="tgh-hint">the platforms {{mkProvider.display_name}} serves - compare its endpoints with the other providers'</span></div>
-            <div class="mk-filters" style="margin:0">
-              <button v-for="pl in mkPlatforms" :key="pl.slug" class="mk-chip" @click="openPlatform(pl.slug)">{{pl.label}} <span>{{pl.endpoints}}</span></button>
-            </div>
-          </div>
 </div>
 </template>

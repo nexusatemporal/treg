@@ -16,8 +16,6 @@ const COL_TIPS = {
 }
 
 export default {
-// The catalog-v2 control arm (state/catalogExperiment.js): the ledger, and no comparison pages anywhere.
-    catalogLegacy(){ return this.catalogArm==='control'; },
 mkProvider(){ return this.providers.find(p=>p.service===this.mkService)||null; },
 mkPaused(){ return this.providerPaused(this.mkService); },
 mkAccounts(){ return this.connAccounts.filter(a=>a.service===this.mkService); },
@@ -110,7 +108,6 @@ mkTabs(){
         return {...g, items:feat, rest:items.filter(p=>p.featured==null), total:items.length};
       });
     },
-mkPlatforms(){ return this.plats.list.filter(pl=>(pl.providers||[]).includes(this.mkService)); },
 platRow(){ return this.plats.list.find(pl=>pl.slug===this.platSlug)||null; },
 platLabel(){ return (this.platData&&this.platData.platform&&this.platData.platform.label)
       || (this.platRow&&this.platRow.label)
