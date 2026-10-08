@@ -1,6 +1,6 @@
 # The GTM engineering playbook (2026), with Claude Code and AI agents
 
-Updated 30 Sep 2026. The page: {BASE}/gtm-engineering
+Updated 8 Oct 2026, with three new studies (chapters 8, 9 and 10). The page: {BASE}/gtm-engineering
 
 Sixteen chapters, from defining your ICP to rolling automation out safely. Each starts from a problem GTM
 engineers post about on Reddit and LinkedIn, then gives the play, a prompt to run in your agent, and the rule
@@ -95,6 +95,11 @@ Rule: pick providers per segment from a test on your own rows, and re-test when 
 23 Sep run: 27 named people, 21 emails found, 20 deliverable, 1 unknown, 0 invalid; the verifier returned no
 catch-all flag. A blank catch-all field means unknown, not safe.
 
+Study, 7 Oct 2026: found is not deliverable. 60 people from a title search for marketing and growth leaders at US
+B2B software companies; the routed finder returned an address for all 60, and verification said 32 deliverable (53%),
+16 risky, 4 unknown, 8 invalid. Of 24 we could check against a live profile, 22 were still in the listed role, so the
+addresses were the weak part, not the list. $0.65 metered. Results vary by segment; run it on your own rows.
+
 Rule: only a verified-deliverable address goes into the main sequence.
 
 ## How to set up signal-based outbound: use signals you can open and date
@@ -104,11 +109,54 @@ days; 355 of 675 postings returned were already closed; the funding provider ret
 months (latest May 2025). Both checks cost $1.35. Install the signals skill:
 `npx skills add superdesigndev/treg --skill lead-signals`
 
+### Job changes: the contact database is usually still on the old job
+
+Study, 7 Oct 2026: 148 people who had posted that they were starting a new role 1 to 60 days earlier (median 13),
+with each post as the answer. Looked up by LinkedIn URL in five contact databases and one live profile read.
+
+| Source | Records found that did not show the new employer |
+|---|---|
+| One database (average of five) | 68% (range 64-74%) |
+| Two databases, either one current | 59% |
+| Live profile read | 4% (2 of 49), but it found only 49 of 148 |
+
+- Not catching up: 61% behind in week one, 69% at one to three weeks, 72% at three to eight weeks.
+- 60% of people: every database that knew them was behind.
+- A hand check of 40 "behind" records found every one named a different organisation, not a spelling of the new one.
+- The live read comes from the profile the person updates, so its agreement is partly expected.
+- Everyone here announced the move publicly; quiet movers are probably updated later still. Databases are not named.
+
+Play: for a job change, confirm the new company with a live profile read before anything else; a second database
+barely helps. Prompt: "Using treg, for each person in job-changes.csv read their live LinkedIn profile and return
+current company, title and start date. Compare with the company in our CRM and flag every mismatch. For mismatches
+only, find and verify an email at the new company. Show the cost before you start."
+
 Rule: no source link, no signal. No "why now", no outreach.
 
 ## Score fit and timing together, then work the top tier first
 
 Tiers on the 27 accounts: A (fit at least 60% and 2+ open GTM roles in 60 days) 8, B (1+) 8, C 11.
+
+### Test a timing signal before you give it a weight
+
+Study, 6 Oct 2026: 57 US startups that announced a seed to Series B round between mid-August and early October 2026,
+against 54 similar startups whose last round was in 2025. What showed up in the 90 days before:
+
+| Signal | Raised next | Did not raise |
+|---|---|---|
+| Opened a sales, marketing or growth role | 30% | 24% |
+| Opened two or more of those roles | 19% | 15% |
+| Opened any job | 47% | 48% |
+| Opened a senior role | 18% | 19% |
+| Hiring sped up against the 90 days before that | 25% | 22% |
+| Was in the news | 26% | 54% |
+
+Nothing on the hiring side separated the groups; the startups that did not raise were in the news more, probably
+because they were older and better covered. Small samples: no evidence of a signal, not proof that none exists.
+Play: act on the funding announcement itself, and check any timing signal on your own wins against losses before it
+gets a weight. Prompt: "Using treg, take wins.csv and losses.csv (domain and close date). For each account pull job
+postings and news from the 90 days before its close date. For each signal, report the share of wins and the share of
+losses that showed it, and tell me which signals separate them by more than 15 points. Show the cost before you start."
 
 Rule: work tier A this week; tier C gets nothing until a signal moves it.
 
@@ -167,8 +215,15 @@ prompts. Cost per correct email on the same 292 people: see the waterfall chapte
 
 ## Every recorded run behind this playbook
 
-30 Sep playbook runs ($2.70, including a $1.08 re-run after our own parsing bug), 23 Sep lead list ($2.33), 16 Sep work-email bench, and the workflows at {BASE}/workflows
+Studies: job changes against five databases (7 Oct, $11.17), hiring and news before a raise (6 Oct, $13.01), found
+against deliverable (7 Oct, $0.65); each on its own sample. Runs on one ICP: 30 Sep playbook runs ($2.70, including a $1.08 re-run after our own parsing bug), 23 Sep lead list ($2.33), 16 Sep work-email bench, and the workflows at {BASE}/workflows
 
 ## Glossary and questions
 
-ICP, TAM, check, waterfall, catch-all, signal, tier, shadow mode: defined on the page.
+ICP, TAM, check, waterfall, catch-all, signal, live read, tier, shadow mode: defined on the page.
+
+How accurate is contact data after someone changes jobs? Not very, for the first two months: 68% of database records
+on average still did not show the new employer (study above). Confirm live before you write.
+
+Do hiring or news signals predict that a startup is about to raise? Not in our test (study above). Act on the
+announcement, and test timing signals on your own deals.
