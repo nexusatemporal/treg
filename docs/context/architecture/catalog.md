@@ -2,6 +2,9 @@
 title: Endpoint catalog — what you can DO with a connected key, and which provider should do it
 status: shipped
 sources:
+  - scripts/catalog_added.py
+  - scripts/catalog_backfill_added.py
+  - .github/workflows/catalog-added.yml
   - src/treg/catalog/fetchinio.yaml
   - src/treg/web/logos/fetchinio.svg
   - src/treg/catalog/examples/fetchinio.linkedin.user.profile.json
@@ -626,6 +629,28 @@ the provider's `source.curated` day.
   same provider, method and path arrives), ids removed and re-added, and unplaceable rows; a
   reviewed rename is applied with `--same-tool OLD=NEW`. The first catalog commit gives most of
   the original catalog one shared date, which is correct.
+
+#### Recently added tools — two search options
+
+`added_within_days=N` and `sort=newest` are the same two options on every surface:
+`GET /catalog/search`, `treg catalog search --new [DAYS] --sort newest`, MCP `catalog_search` on
+`/mcp/` and `/mcp/v2/`. The dashboard does not offer them yet. Without either
+option search is exactly what it was (same rows, same order); the only addition is `added` on each
+row, and in `GET /catalog/endpoints/{id}`. `store.added_options` reads them: a window below one day
+is a 400 (an `invalid_option` error on MCP); above `ADDED_DAYS_MAX` (365) it is capped and the
+answer says so (`capped_at_days`). A bare CLI `--new` asks for 30 days, and the MCP and
+agent-facing docs suggest 30.
+
+With an option, `application.catalog_search.added_page` builds the page: `store.added_keep` keeps
+rows whose `added` day is today (UTC) or within the N days before it, words are optional, and the
+answer is a flat list, best match first with words and newest first with `sort=newest` or with no
+words. It runs no judge and writes no experiment record. Two rows have no provider YAML:
+
+- **A routed row** (`treg.<capability>`) has `added: null` and is left out of these lists. It is a
+  choice among tools, not a tool that arrived on a day; its children are the tools, each with its
+  own date. A date derived from the children would be a guess.
+- **A listed hub tool** has `added` = the UTC day treg approved its listing
+  (`HubListing.decided_at`), the day it reached search. An unlisted one shows none.
 
 ### Domain sections — grouping endpoints for browse
 
