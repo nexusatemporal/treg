@@ -198,7 +198,8 @@ so parallel runs and side-by-side runs never share one.
   `fix: ...`, `docs: ...`); one logical change per commit; the PR says what changed and why and
   names the fragments it updated.
 - `/mcp/` and `/mcp/v2/` differ on purpose. A change to either or to shared MCP code is reviewed
-  against both; do not unify them in passing.
+  against both; do not unify them in passing. `/mcp/v2/`'s tools and hidden platforms match the
+  Claude directory submission: change them only with a resubmission. New features go to `/mcp/`.
 - **Every tool row carries `added:`**, the UTC day it reached main (`scripts/catalog_added.py`
   writes today's where it is missing). Never change an existing one without the
   `added-date-change` label; CI compares every tool id with the base branch.

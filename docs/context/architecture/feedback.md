@@ -68,9 +68,9 @@ CLI `cmd_feedback` sends the same payload to its configured registry, reading a 
 from stdin when the message argument is `-` (a terminal is rejected instead of blocking).
 `cmd_feedback_get` retrieves a report through the same team-scoped HTTP read. The CLI rejects
 empty or oversized messages locally and emits structured errors without echoing rejected input;
-transport failures leave submission outcomes explicitly unconfirmed. Both MCP surfaces expose `feedback` with an enum in
-their input schema, relay to the same HTTP intake, and declare a non-destructive, non-idempotent
-local write. Their existing call permissions and transport boundaries remain distinct.
+transport failures leave submission outcomes explicitly unconfirmed. The team `/mcp/` exposes `feedback` with an enum in
+its input schema, relays to the same HTTP intake, and declares a non-destructive, non-idempotent
+local write. `/mcp/v2/` does not expose it: its tools match the Claude directory submission.
 
 `skill.md` mentions feedback in its description and links to `{BASE}/feedback.md`, served by
 `feedback_md` with the deployment's base URL. Detailed syntax and privacy guidance live in that
