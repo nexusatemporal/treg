@@ -376,6 +376,9 @@ def _show_hint_line(resp: httpx.Response) -> None:
     kind = headers.get("X-Treg-Hint")
     if kind is None and headers.get("X-Treg-Review") == "requested":
         kind = "review"
+    if routed := headers.get("X-Treg-Routed-Tool"):
+        print(f"treg: {routed} does this job and picks the provider, with fallback; "
+              "prefer it unless you need options only this provider has.", file=sys.stderr)
     if not call_id:
         return
     if kind == "review":
@@ -2537,6 +2540,8 @@ def _call_envelope(response: httpx.Response, content_type: str) -> dict:
         meta["async"] = True
     if kind := headers.get("X-Treg-Hint"):
         meta["hint"] = kind
+    if routed := headers.get("X-Treg-Routed-Tool"):
+        meta["routed_tool"] = routed
     return {"result": result, "_treg": meta}
 
 
