@@ -305,6 +305,12 @@ served_by, cost_micro}`, `verdict` one of `valid`, `invalid`, `catch_all`, `risk
 `checked: false` with a `reason` means no check ran and cost nothing; `pending: true` means the
 verifier is still working (its `call_id` is the async task). An invalid address is still returned,
 with its verdict. A miss is never checked (`checked: false`, `reason: no_hit`). Other routed tools refuse the header (422, unbilled).
+On `treg.people.phone.find` the same header checks the line with HLR Lookup's live network lookup
+(`hlrlookup.people.phone.verify`, your own HLR key first): `verdict` is `live`, `dead` or
+`unknown`. A live line is not proof the number is this person's; for a US number,
+`trestleiq.people.contact.verify` checks the name. A number not written internationally (`+` or
+`00` first) is not checked: `reason: not_international`, nothing charged. A dead number is still
+returned, with its verdict.
 <!--hub-->
 `treg-hub.verified-email` does find + verify in one call and bills its fee only on a usable email.
 <!--/hub-->

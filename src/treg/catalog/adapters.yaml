@@ -367,6 +367,23 @@ adapters:
     out: {valid: data.valid, phone: data.e164_format, country_code: data.country_code, line_type: data.line_type, carrier: data.carrier}
     miss: "data.valid == null"
 
+  # ---- people.phone.live --------------------------------------------------------------------
+  hlrlookup.people.phone.verify:
+    route: false
+    accepts: [[phone]]
+    in_expr: {body.telephone_number: "e164_digits(phone)",
+              body.usa_status: "choose(starts_with(e164_digits(phone), '1'), 'YES', 'NO')"}
+    const: {body.save_to_cache: PRIVATE, body.cache_days_global: 0, body.cache_days_private: 0}
+    test_identity: {phone: "+447540822872"}
+    out: {live_status: "results[0].live_status", phone: "results[0].detected_telephone_number",
+          line_type: "results[0].telephone_number_type", current_network: "results[0].current_network_details.name",
+          ported: "results[0].is_ported == 'YES'"}
+    # A per-result error is free and says nothing about the line.
+    miss: "at_least(results[0].error != 'NONE', coalesce(results[0].live_status) == null)"
+    # Only LIVE and DEAD are answers about the line; the rest say HLR could not tell.
+    verdicts: {absent_subscriber: unknown, no_teleservice_provisioned: unknown, not_available_network_only: unknown,
+               no_coverage: unknown, inconclusive: unknown, not_applicable: unknown}
+
   # ---- people.email.verify ------------------------------------------------------------------
   dropleads.people.email.verify:
     accepts: [[email]]

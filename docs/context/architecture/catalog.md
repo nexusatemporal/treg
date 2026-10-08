@@ -1882,7 +1882,14 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   stores. `X-Treg-Cost-Micro` and `_treg.charged_micro` are find plus check; a check still pending
   after the routed async wait reports its hold and `pending: true`, settled later by the worker. A
   hit's advice is dropped once a check ran. The header on a contract without `check` is a 422
-  before anything is planned. `routed: false` declares an
+  before anything is planned. `people.phone.find`'s check is direct: `hlrlookup.people.phone.verify`
+  under its own `people.phone.live` contract (`live` / `dead` / `unknown`; the format check stays
+  `people.phone.verify`), `routed: false` because it has one provider, and its adapter
+  `route: false` so the arena never picks it. A check's `when` (an expression over `{field: value}`)
+  and `skip_reason` skip a hit before any call: a phone not written internationally
+  (`e164_digits`) is `not_international`, because HLR reads a national number's first digits as a
+  country code. The adapter sends `usa_status` only for `+1` numbers and never reads a cache.
+  `routed: false` declares an
   admission-only contract: its adapters verify like any other (which is what the archive's
   `has_result_rules` reads), but no `treg.<capability>` row is ever generated from it. For a
   capability whose "children" are one provider's price tiers, not a choice treg should make.

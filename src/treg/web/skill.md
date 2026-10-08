@@ -86,6 +86,8 @@ Notes:
 - To find AND check an email in one call, send `--header "X-Treg-Route-Verify: true"` on
   `treg.people.email.find`. The check is its own small charge. Read `_treg.verification.verdict`
   (`valid`, `invalid`, `catch_all`, `risky`, `unknown`); `checked: false` means no check ran.
+  The same header on `treg.people.phone.find` checks the line live: `live`, `dead` or `unknown`.
+  Never call a phone "verified": a live line is not proof it is this person's number.
 - A catalog endpoint can use a verified public route with no provider key. Such a call is free when
   the caller does not send a provider credential. The team tool or stored provider key still wins.
 - Discovery jobs usually have TWO shapes in the catalog — a structured one (filters: title, location,

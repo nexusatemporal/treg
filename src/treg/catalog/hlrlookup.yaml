@@ -15,7 +15,7 @@ proposed_capabilities:
 endpoints:
   - id: hlrlookup.people.phone.verify
     domain: contacts
-    capability: people.phone.verify
+    capability: people.phone.live
     platform: people
     scope: any_account
     method: POST
