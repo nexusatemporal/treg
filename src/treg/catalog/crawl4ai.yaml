@@ -85,15 +85,15 @@ endpoints:
     test_request: {body: {url: "https://example.com", format: md}}
     cost:
       type: per_success
-      value: 1
+      value: 0.15
       currency: credit
       per: 1
       unit: page
       source: observed
       source_url: https://api.crawl4ai.com/v1/prices
-      checked: '2026-10-06'
+      checked: '2026-10-08'
       confidence: verified
-      note: "treg's account price: 0.075 archived repeat, 0.15 plain page or PDF, 0.5 browser page, 1 hard page; failures free. The 1-credit hold is the hardest page; the x-c4-cost header settles the actual charge (0.15 plain, 0.075 archived and 0.15 PDF observed live 2026-10-06)."
+      note: "treg's account price: a flat 0.15 credits per page at every effort (archived, plain, PDF, browser, hard); failures free. The x-c4-cost header settles the charge (0.150 observed live 2026-10-08 at efforts 0, 1, 2 and 3)."
     verified: '2026-10-05'
     docs_url: https://crawl4ai.com/llms.txt
     example_response: examples/crawl4ai.web.scrape.json
@@ -291,8 +291,8 @@ endpoints:
     test_request: {body: {urls: ["https://example.com"], format: md}}
     cost:
       type: per_success
-      value: 25
-      fallback: {value: 25, note: "25 URLs at the hardest page price, when the stream ends without its summary line."}
+      value: 3.75
+      fallback: {value: 3.75, note: "25 URLs at the flat page price, when the stream ends without its summary line."}
       currency: credit
       unit: call
       settle: usage
@@ -301,7 +301,7 @@ endpoints:
       source_url: https://api.crawl4ai.com/v1/prices
       checked: '2026-10-05'
       confidence: verified
-      note: "Each URL costs like a scrape (0.075 to 1 credit on treg's account) and its line carries that cost; the closing summary line carries the total, which settles the call. The 25-credit hold is 25 URLs at the hardest page price."
+      note: "Each URL costs like a scrape (a flat 0.15 credits on treg's account) and its line carries that cost; the closing summary line carries the total, which settles the call. The 3.75-credit hold is 25 URLs at that price."
     verified: '2026-10-05'
     docs_url: https://crawl4ai.com/llms.txt
     example_response: examples/crawl4ai.web.extract.batch.json
