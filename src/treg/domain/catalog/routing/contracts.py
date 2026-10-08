@@ -15,10 +15,13 @@ from . import paths as P
 @dataclass(frozen=True)
 class Check:
     """The opt-in check after a hit (`X-Treg-Route-Verify`): one more call, to `endpoint`, with the
-    hit's `field` as its identity key of the same name. `prefer` orders that call's providers only."""
+    hit's `field` as its identity key of the same name. `prefer` orders that call's providers only.
+    `when` is an expression over `{field: value}`; a hit failing it is not checked, for `skip_reason`."""
     endpoint: str
     field: str
     prefer: tuple[str, ...] = ()
+    when: str = ""
+    skip_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -209,8 +212,11 @@ def _parse_check(cap: str, raw, output: dict) -> Check | None:
         return None
     if not isinstance(raw, dict) or not raw.get("endpoint") or raw.get("field") not in output:
         raise ValueError(f"contract {cap}: check needs an `endpoint` and a `field` from its output")
+    if bool(raw.get("when")) != bool(raw.get("skip_reason")):
+        raise ValueError(f"contract {cap}: check `when` and `skip_reason` come together")
     return Check(endpoint=str(raw["endpoint"]), field=str(raw["field"]),
-                 prefer=tuple(str(p).lower() for p in raw.get("prefer") or ()))
+                 prefer=tuple(str(p).lower() for p in raw.get("prefer") or ()),
+                 when=str(raw.get("when") or ""), skip_reason=str(raw.get("skip_reason") or ""))
 
 
 def _parse_verdict(cap: str, raw) -> dict:

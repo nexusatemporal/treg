@@ -266,6 +266,13 @@ find plus check. The answer adds `_treg.verification: {verdict, checked, served_
 (`no_hit`, `over_cost_limit`, `checker_failed`, `no_checker`, `not_allowed`, `spend_limit`) mean
 no check ran and it cost nothing. A miss is never checked: its reason is `no_hit`. Other routed tools refuse the header (422, unbilled).
 
+On `treg.people.phone.find` the same header checks the line with HLR Lookup's live network lookup
+(`hlrlookup.people.phone.verify`): your own HLR key first, `usa_status` only for `+1` numbers, no
+cache reads. The verdict is `live` / `dead` / `unknown`; a live line is not proof the number is
+this person's (`trestleiq.people.contact.verify` checks a US name). A number not written
+internationally is never sent, because HLR would read its first digits as a country code: reason
+`not_international`, nothing charged.
+
 ```bash
 treg call treg.people.email.find --body '{"full_name": "Patrick Collison", "domain": "stripe.com"}' \
   --header "X-Treg-Route-Verify: true"

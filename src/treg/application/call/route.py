@@ -41,6 +41,7 @@ from ...domain.capacity.signatures import classify as classify_capacity
 from ...domain.catalog import results as catalog_results
 from ...domain.catalog import stats as endpoint_stats
 from ...domain.catalog import store as catalog_store
+from ...domain.catalog.routing import paths as P
 from ...domain.catalog.routing.contracts import canonical_identity, declared_miss, miss_status
 from ...domain.catalog.routing.plan import (
     MAX_ERROR_FALLBACKS, Candidate, Plan, candidates_for, cost_at, ignored_filters, rank, unscoped,
@@ -848,6 +849,8 @@ async def _run_check(parent: CallContext, check, output: dict, remaining: int | 
     value = output.get(check.field)
     if ep is None or not isinstance(value, str) or not value.strip():
         return _unchecked("no_checker"), 0
+    if check.when and not P.evaluate(check.when, {check.field: value}):
+        return _unchecked(check.skip_reason), 0
     routed = ep.get("kind") == "routed"
     if routed:
         query, body = {}, {check.field: value}

@@ -259,10 +259,31 @@ def choose(condition: Any, when_true: Any, when_false: Any) -> Any:
     return when_true if condition else when_false
 
 
+def e164_digits(v: Any) -> str | None:
+    """`+44 7790 606023` or `0044…` → `447790606023`; None for a number not written internationally.
+
+    Digits alone are never trusted: a national `6175551212` reads as a `61` (Australian) number."""
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    if s.startswith("+"):
+        digits = re.sub(r"\D", "", s)
+    elif s.startswith("00"):
+        digits = re.sub(r"\D", "", s)[2:]
+    else:
+        return None
+    return digits if 7 <= len(digits) <= 15 else None
+
+
+def starts_with(v: Any, prefix: Any) -> bool:
+    return isinstance(v, str) and prefix is not None and v.startswith(str(prefix))
+
+
 TRANSFORMS = {"values": values, "get": get_path, "null_if": null_if, "choose": choose, "split_first": split_first, "split_last": split_last, "join": join, "has_type": has_type, "len": length,
               "dfs_location": dfs_location, "seranking_source": seranking_source, "lower": lower, "upper": upper,
               "list": as_list, "at_least": at_least, "at_most": at_most, "linkedin_handle": linkedin_handle, "linkedin_url": linkedin_url,
-              "email_domain": email_domain, "host": host, "fmt": fmt, "obj": obj, "tca_filter": tca_filter, "csv": csv, "country_name": country_name}
+              "email_domain": email_domain, "host": host, "fmt": fmt, "obj": obj, "tca_filter": tca_filter, "csv": csv, "country_name": country_name,
+              "e164_digits": e164_digits, "starts_with": starts_with}
 
 _CALL = re.compile(r"^(\w+)\((.*)\)$")
 _DIV = re.compile(r"^(.+?)\s*/\s*(\d+(?:\.\d+)?)$")
