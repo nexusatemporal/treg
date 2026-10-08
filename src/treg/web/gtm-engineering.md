@@ -38,15 +38,20 @@ What a GTM engineer does in a week:
 5. Keep the data honest: verify before sending, re-check people who just moved, test a signal before it gets a weight.
 6. Measure and roll out: tag every row so pipeline traces back to a list, a signal and a provider (chapters 14 to 16).
 
-| Role | Owns | Judged on |
+Titles vary and the work overlaps, and in many teams GTM engineers sit inside RevOps. For the pipeline work in this
+playbook, this is a useful way to divide it:
+
+| Role | Typical focus | Example measures |
 |---|---|---|
-| GTM engineer | The systems that create pipeline: lists, enrichment, signals, routing, research for outreach | Qualified pipeline per hour and per dollar of data |
-| RevOps | The CRM, territories, forecasting and reporting | Clean data and a forecast leadership trusts |
+| GTM engineer | Automated workflows: lists, enrichment, scoring, signals, routing, research for outreach | Qualified pipeline per hour and per dollar of data |
+| RevOps | Revenue processes, systems, planning, data governance and reporting across teams | Data quality, forecast reliability, revenue efficiency |
 | Sales or marketing ops | Tool admin, sequences, campaigns and lead handoff | Tools that run and leads that reach the right rep |
 | SDR | Conversations: first touches, follow-ups, booked meetings | Meetings held |
 
-RevOps keeps the record straight; a GTM engineer builds what puts new rows in it. A team needs one when the ICP can be
-written down and someone does the same research by hand every week. The skills: writing rules a machine can follow,
+Roughly: RevOps decides how the revenue system should work, and a GTM engineer builds the automated parts of it. The
+workflows here pay off once the ICP can be written down and someone does the same research by hand every week; a
+small workflow can be owned by someone already on the team, and a dedicated role makes sense when volume and value
+justify it. The skills: writing rules a machine can follow,
 data judgement (cost per correct result, what goes stale), testing a signal before trusting it, enough sales sense to
 spot a weak reason to write, and comfort with an agent, a CLI and a spreadsheet.
 
