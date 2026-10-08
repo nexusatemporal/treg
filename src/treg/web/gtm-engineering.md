@@ -24,7 +24,32 @@ Set up once, in Claude Code, Codex or Cursor: `set up treg - {BASE}/llms.txt`
 
 ## What is a GTM engineer, and what tools and data providers do they need in 2026?
 
-A GTM engineer builds the machine that finds, qualifies and reaches buyers. In 2026 more of it runs from an agent.
+A GTM engineer turns a company's sales and marketing playbook into systems that run every week: the ICP written as
+filters, lists built and enriched, signals that say who to contact now, research for every first line, and routing for
+inbound, with a person approving what goes out. GTM engineering is the practice; the GTM engineer owns it. The job sits
+between RevOps, sales and engineering, and in 2026 more of it runs from an agent such as Claude Code or Codex.
+
+What a GTM engineer does in a week:
+1. Write the ICP down from the deals the team won and kept, as fields a provider can filter on (chapter 1).
+2. Build and enrich lists cheaply: qualify on fields you have, pay for people, emails and verification only on rows
+   that pass (chapters 4 to 8).
+3. Watch for timing: hiring, funding, job changes and posts, each with a link and a date, scored against fit (9, 10).
+4. Hand reps the reason to write, with its source, and keep a person on the send button (chapter 11).
+5. Keep the data honest: verify before sending, re-check people who just moved, test a signal before it gets a weight.
+6. Measure and roll out: tag every row so pipeline traces back to a list, a signal and a provider (chapters 14 to 16).
+
+| Role | Owns | Judged on |
+|---|---|---|
+| GTM engineer | The systems that create pipeline: lists, enrichment, signals, routing, research for outreach | Qualified pipeline per hour and per dollar of data |
+| RevOps | The CRM, territories, forecasting and reporting | Clean data and a forecast leadership trusts |
+| Sales or marketing ops | Tool admin, sequences, campaigns and lead handoff | Tools that run and leads that reach the right rep |
+| SDR | Conversations: first touches, follow-ups, booked meetings | Meetings held |
+
+RevOps keeps the record straight; a GTM engineer builds what puts new rows in it. A team needs one when the ICP can be
+written down and someone does the same research by hand every week. The skills: writing rules a machine can follow,
+data judgement (cost per correct result, what goes stale), testing a signal before trusting it, enough sales sense to
+spot a weak reason to write, and comfort with an agent, a CLI and a spreadsheet.
+
 The stack: an agent (Claude Code, Codex, Cursor, Hermes); a data layer (company and people search, enrichment, email
 finding and verification, hiring, funding, news, social; treg.to is one, one key, priced per call, your own keys
 first); skills (the method); a sending tool; a CRM.

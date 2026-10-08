@@ -143,6 +143,8 @@ async def test_studies_publish_results_without_naming_the_databases(clients: Asy
     schema = {e["name"]: e["acceptedAnswer"]["text"] for e in faq["mainEntity"]}
     visible = {_html.unescape(q): _html.unescape(re.sub(r"<[^>]+>", "", a))
                for q, a in re.findall(r"<summary>([^<]*)</summary><div class=\"body\">(.*?)</div>", page, re.S)}
-    for q in ("How accurate is contact data after someone changes jobs?",
+    assert 'id="what-is-a-gtm-engineer"' in page and "GTM engineer, RevOps or sales ops?" in page
+    for q in ("What is the difference between a GTM engineer and RevOps?",
+              "How accurate is contact data after someone changes jobs?",
               "Do hiring or news signals predict that a startup is about to raise?"):
         assert visible[q] == schema[q], q
