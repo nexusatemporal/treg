@@ -40,7 +40,9 @@ contracts:
     # Attached as `_treg.advice` when a hit's `verified` is not true. A find is a guess the provider
     # scored, not a delivery check: 2026-09-06 one team sent to catch-all (`accept_all`) and
     # pattern-guessed hits without verifying and bounced on most of them.
-    advice_unverified: "This address was found, not confirmed deliverable (verified != true). Run treg.people.email.verify on it before outreach — a fraction of a cent, and it catches catch-all domains and dead mailboxes."
+    advice_unverified: "This address was found, not confirmed deliverable (verified != true). Send X-Treg-Route-Verify: true and treg checks it with treg.people.email.verify in the same call, or run that check yourself before outreach — a fraction of a cent, and it catches catch-all domains and dead mailboxes."
+    # `X-Treg-Route-Verify`: checks every hit, a finder's own `verified` included; BounceBan first here only.
+    check: {endpoint: treg.people.email.verify, field: email, prefer: [bounceban]}
 
   # ---- batch 1: social lookups (2026-08-28) ---------------------------------------------------
   instagram.user.profile:

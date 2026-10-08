@@ -106,6 +106,9 @@ Notes:
   `treg catalog get` for its fields, parameters and price before choosing. If you need a provider's
   catch-all, disposable, role-address or SMTP field, call that provider's endpoint: the routed
   `treg.people.email.verify` contract defines only `valid`, `status` and `score`.
+- To find AND check an email in one call, send `--header "X-Treg-Route-Verify: true"` on
+  `treg.people.email.find`. The check is its own small charge. Read `_treg.verification.verdict`
+  (`valid`, `invalid`, `catch_all`, `risky`, `unknown`); `checked: false` means no check ran.
 - A catalog endpoint can use a verified public route with no provider key. Such a call is free when
   the caller does not send a provider credential. The team tool or stored provider key still wins.
 - Discovery jobs usually have TWO shapes in the catalog — a structured one (filters: title, location,
