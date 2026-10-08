@@ -162,6 +162,13 @@ Notes:
     registry these ids answer 404: fall back to the routed endpoints below.
 <!--/hub-->
 <!--routed-->
+  - **For a common job, call the routed tool, not a provider you remember.** Scraping a page
+    (`treg.web.extract`), web search (`treg.web.search`), Google results (`treg.google.serp.organic`,
+    `treg.google.serp.maps`), finding or verifying an email (`treg.people.email.find`,
+    `treg.people.email.verify`) and most social profiles have a `treg.<capability>` tool. treg picks
+    the provider (your own key first), falls back when one fails or misses, and charges only the
+    answer it returns. A provider you used last week may not be the best choice today: prices and
+    reliability change. Name a provider only when you need fields or options that only it has.
   - **Routed endpoints** (`treg.<capability>`, e.g. `treg.people.email.find`) are where you can
     ask treg to choose: POST the identity (`{full_name, domain}` | `{first_name, last_name, domain}` |
     `{linkedin_url}`); treg runs the best child (own keys first, then cheapest per hit), falls back
