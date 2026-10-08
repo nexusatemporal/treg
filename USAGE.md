@@ -258,6 +258,19 @@ on by default), cheapest first, within `X-Treg-Route-Max-Cost` (default $1 per c
 attempt settles at its real price and misses on per-success providers are free. `X-Treg-Route-Waterfall: 0`
 stops at the first miss. `X-Treg-Route-Prefer` / `X-Treg-Route-Exclude` name providers. A filter the serving provider could not apply is named in `X-Treg-Ignored-Filters` (and `_treg.ignored_filters`); `X-Treg-Route-Strict-Filters: 1` refuses such a call with a 422 (unbilled) instead. Vendor endpoints are still relayed verbatim; only `treg.*` rows model an API.
 
+`X-Treg-Route-Verify: true` on `treg.people.email.find` checks a hit with `treg.people.email.verify`
+in the same call: your own verifier key first, then BounceBan, then the usual order. The check is
+its own call with its own charge, inside the same `X-Treg-Route-Max-Cost`; `X-Treg-Cost-Micro` is
+find plus check. The answer adds `_treg.verification: {verdict, checked, served_by, cost_micro}`
+(`valid` / `invalid` / `catch_all` / `risky` / `unknown`). `checked: false` and a `reason`
+(`no_hit`, `over_cost_limit`, `checker_failed`, `no_checker`, `not_allowed`, `spend_limit`) mean
+no check ran and it cost nothing. A miss is never checked: its reason is `no_hit`. Other routed tools refuse the header (422, unbilled).
+
+```bash
+treg call treg.people.email.find --body '{"full_name": "Patrick Collison", "domain": "stripe.com"}' \
+  --header "X-Treg-Route-Verify: true"
+```
+
 When a routed child is asynchronous, treg submits and polls it internally for up to 60 seconds. If
 it is still processing, the route returns HTTP 202 with `_treg.outcome: "pending"`, the child call
 reference and poll descriptor, `reserved_micro`, and `charged_micro: null`. That attempt stops the

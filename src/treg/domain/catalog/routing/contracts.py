@@ -13,6 +13,15 @@ from . import paths as P
 
 
 @dataclass(frozen=True)
+class Check:
+    """The opt-in check after a hit (`X-Treg-Route-Verify`): one more call, to `endpoint`, with the
+    hit's `field` as its identity key of the same name. `prefer` orders that call's providers only."""
+    endpoint: str
+    field: str
+    prefer: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Contract:
     capability: str
     summary: str
@@ -29,8 +38,7 @@ class Contract:
     # before outreach. Empty = no advice. A search contract has no `verified` output, so advice
     # set there attaches to EVERY hit — deliberate for `people.search`, whose rows carry emails
     # nobody vouched for (2026-09-08: 73 of 79 bounces were unverified directory rows). A
-    # suggestion only: treg never chains the verify call itself, which would double every hit's
-    # price and change what the find bills for.
+    # suggestion only unless the caller asks for the check (`check`, below).
     advice_unverified: str = ""
     # False = the contract exists so the archive can judge found/empty (`results.has_result_rules`
     # needs a verified adapter, and an adapter verifies only against a contract); no
@@ -52,6 +60,8 @@ class Contract:
     verdict_from: str = ""
     verdict_words: tuple[str, ...] = ()
     verdict_map: dict[str, str] = field(default_factory=dict)
+    # The check a caller may ask for with `X-Treg-Route-Verify`; None = the header is refused.
+    check: Check | None = None
 
     @property
     def required_output(self) -> tuple[str, ...]:
@@ -189,8 +199,18 @@ def parse_contracts(doc: dict) -> dict[str, Contract]:
             routed=bool(c.get("routed", True)),
             scoping=tuple(str(k) for k in scoping),
             prefer=tuple(str(p).lower() for p in c.get("prefer") or ()),
+            check=_parse_check(cap, c.get("check"), c.get("output") or {}),
             **_parse_verdict(cap, c.get("verdict")))
     return out
+
+
+def _parse_check(cap: str, raw, output: dict) -> Check | None:
+    if not raw:
+        return None
+    if not isinstance(raw, dict) or not raw.get("endpoint") or raw.get("field") not in output:
+        raise ValueError(f"contract {cap}: check needs an `endpoint` and a `field` from its output")
+    return Check(endpoint=str(raw["endpoint"]), field=str(raw["field"]),
+                 prefer=tuple(str(p).lower() for p in raw.get("prefer") or ()))
 
 
 def _parse_verdict(cap: str, raw) -> dict:

@@ -5825,6 +5825,8 @@ def _catalog_get(endpoint_id: str, cfg) -> None:
         _dim("  a miss tries the next one (ceiling $1 per call by default); --header 'X-Treg-Route-Max-Cost: 0.05' to cap it,")
         _dim("  --header 'X-Treg-Route-Waterfall: 0' to stop at the first miss,")
         _dim("  --header 'X-Treg-Route-Strict-Filters: 1' to refuse (422, unbilled) rather than call a provider that ignores a filter you sent")
+        if "X-Treg-Route-Verify" in (routing.get("headers") or {}):
+            _dim("  --header 'X-Treg-Route-Verify: true' to check a hit in the same call, at the check's own price")
         also = routing.get("also") or []
         if also:
             print(f"\n{_A}ALSO{_R}  {_M}the same job from providers treg does not route to (yet) — call them by id{_R}")

@@ -1867,8 +1867,22 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   the same team's 79-address bounce list (2026-09-08) was 73 unverified Hunter domain-search rows
   and agent-guessed `info@` addresses that one verify call each would have caught. The
   `hunter.companies.emails` catalog summary carries the same warning for direct `/call/` users,
-  whose body is relayed verbatim. A suggestion only: treg never chains the verify call, which
-  would double every hit's price and change what the find bills. `routed: false` declares an
+  whose body is relayed verbatim. By default the advice is a suggestion only: treg does not chain
+  the verify call, which would add a price to every hit. `check` (`people.email.find`:
+  `{endpoint: treg.people.email.verify, field: email, prefer: [bounceban]}`) is the opt-in: with
+  `X-Treg-Route-Verify` the router runs that call after a hit (`_run_check`), as an ordinary
+  linked child `:v` through `execute_call`, with the hit's `field` as its identity. A routed check
+  runs its own waterfall and closes its own holds; `prefer` reaches that call only, below the
+  team's own key in `rank`. A direct (non-routed) check is built by its adapter and leaves its hold
+  in the find's `pending`. The find's holds stay open during the check, so cancellation releases
+  both. The check gets the cost ceiling the find left; one that does not fit, is refused, or fails
+  never fails the find: `_treg.verification` says `checked: false` with a `reason` and costs 0
+  (`no_hit` when the find missed, which is never checked).
+  Its `verdict` is `results.verdict` on the serving child, the same word `CallRecord.verdict`
+  stores. `X-Treg-Cost-Micro` and `_treg.charged_micro` are find plus check; a check still pending
+  after the routed async wait reports its hold and `pending: true`, settled later by the worker. A
+  hit's advice is dropped once a check ran. The header on a contract without `check` is a 422
+  before anything is planned. `routed: false` declares an
   admission-only contract: its adapters verify like any other (which is what the archive's
   `has_result_rules` reads), but no `treg.<capability>` row is ever generated from it. For a
   capability whose "children" are one provider's price tiers, not a choice treg should make.

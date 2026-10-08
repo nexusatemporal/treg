@@ -934,7 +934,9 @@ resolution - and both are listed in the dataplane write allowlist on their own
 `MarketplaceCall.max_cost_micro` carries the caller's remaining ceiling. `_platform_reserve`
 checks the actual reservation estimate with margin before opening its transaction or creating a
 hold. Direct calls only set it when the caller supplies `X-Treg-Route-Max-Cost`; routed children
-always inherit their route's remaining ceiling, including its default. A refusal is a 402
+always inherit their route's remaining ceiling, including its default. A routed find's opt-in
+check (`X-Treg-Route-Verify`, catalog.md) is one more such child: it gets what the find left, and
+its refusal leaves the find charged and the check unrun. A refusal is a 402
 `route_max_cost` and moves no money for that attempt. Overflow inherits the same field via its
 child snapshot and checks its own estimate; a preceding direct charge reduces the remainder.
 This is a pre-reservation guard, not a rewrite of provider-reported settlement evidence.
