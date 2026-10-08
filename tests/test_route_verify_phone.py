@@ -219,6 +219,30 @@ async def test_a_quickenrich_us_hit_is_now_checked_live(clients: AsyncClient, qu
     assert d["_treg"]["verification"]["verdict"] == "live" and d["_treg"]["verification"]["checked"] is True
 
 
+async def test_a_skipped_check_says_why_instead_of_asking_for_the_header(clients: AsyncClient, quickenrich_on, monkeypatch):
+    monkeypatch.setattr(call_service, "relay", _relay({"quickenrich": [_quickenrich("4155550142", "GB")]}, []))
+    r = await clients.post(f"/call/{FIND}", json={"linkedin_url": "https://www.linkedin.com/in/example"}, headers=ON)
+    d = r.json()
+    assert d["_treg"]["verification"]["reason"] == "not_international"
+    advice = catalog_store.load().contracts["people.phone.find"].check.skip_advice
+    assert d["_treg"]["advice"] == advice
+    assert "X-Treg-Route-Verify" not in advice and "input_format" in advice
+
+
+async def test_without_the_header_the_find_keeps_its_advice(clients: AsyncClient, quickenrich_on, monkeypatch):
+    monkeypatch.setattr(call_service, "relay", _relay({"quickenrich": [_quickenrich("4155550142", "GB")]}, []))
+    r = await clients.post(f"/call/{FIND}", json={"linkedin_url": "https://www.linkedin.com/in/example"})
+    d = r.json()
+    assert "verification" not in d["_treg"]
+    assert d["_treg"]["advice"] == catalog_store.load().contracts["people.phone.find"].advice_unverified
+
+
+def test_skip_advice_needs_a_when():
+    from treg.domain.catalog.routing.contracts import _parse_check
+    with pytest.raises(ValueError, match="skip_advice"):
+        _parse_check("x", {"endpoint": "e", "field": "phone", "skip_advice": "tip"}, {"phone": {}})
+
+
 def test_starts_with():
     assert P.starts_with("14155550142", "1") and not P.starts_with("447540822872", "1")
     assert not P.starts_with(None, "1")

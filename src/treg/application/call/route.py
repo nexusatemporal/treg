@@ -800,15 +800,18 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
     advice = (plan.contract.advice_unverified
               if plan.contract.advice_unverified and output and output.get("verified") is not True else "")
     verification = None
-    if options.verify and plan.contract.check is not None and winner_outcome in ("hit", "weak"):
+    check = plan.contract.check
+    if options.verify and check is not None and winner_outcome in ("hit", "weak"):
         # The find's holds stay open in `pending` while the check runs: a cancellation releases
         # them with everything else, and `run_routed` still closes each exactly once.
         remaining = max(0, options.max_cost_micro - spent) if options.max_cost_micro is not None else None
-        verification, check_cost = await _run_check(parent, plan.contract.check, output, remaining,
+        verification, check_cost = await _run_check(parent, check, output, remaining,
                                                     pending, execute_child, upstream_client)
         spent += check_cost
         if verification["checked"]:
             advice = ""   # the verdict answers what the advice suggests
+        elif check.skip_advice and verification["reason"] == check.skip_reason:
+            advice = check.skip_advice   # the caller asked; say why this hit was not checked
     elif options.verify:
         verification = _unchecked("no_hit")   # a miss is never checked; say why
     body_out = {"output": output or {k: None for k in plan.contract.output}, "raw": doc,

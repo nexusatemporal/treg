@@ -1888,7 +1888,8 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   `route: false` so the arena never picks it. A check's `when` (an expression over `{field: value}`)
   and `skip_reason` skip a hit before any call: a phone not written internationally
   (`e164_digits`) is `not_international`, because HLR reads a national number's first digits as a
-  country code. The adapter sends `usa_status` only for `+1` numbers and never reads a cache.
+  country code. The check's `skip_advice` then replaces the find's advice, which would ask for
+  the header the caller already sent; the words live in `contracts.yaml`. The adapter sends `usa_status` only for `+1` numbers and never reads a cache.
   A finder that sends bare national digits plus a country field can add the code in its `out`:
   `with_country_code(phone, country)` turns a 10-digit US or Canadian number (spaces, `-`, `.`
   and parentheses aside) into `+1…` and
