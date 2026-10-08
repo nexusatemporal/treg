@@ -1409,6 +1409,11 @@ async def _call_impl(endpoint_id: str, params: dict | list | None = None,
             out["hint"] = hints.review_hint(out["call_id"])
         elif kind == "feedback":
             out["hint"] = hints.HINT
+    if routed := r.headers.get("X-Treg-Routed-Tool"):
+        out["routed_tool"] = routed
+        out["suggestion"] = (f"{routed} does this job: treg picks the provider, falls back when one "
+                             "fails or misses, and charges only the answer. Prefer it next time unless "
+                             "you need options only this provider has.")
     if r.status_code == 402:
         # States the fact and stops. No link, and `topup_url` is stripped from the relayed body, so
         # nothing on this path points a user at a payment page.

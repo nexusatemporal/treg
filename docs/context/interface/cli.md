@@ -47,7 +47,11 @@ contract's enum and description with MCP. It validates the reference and trimmed
 posts to `/reviews`, prints a receipt, and emits structured errors without echoing rejected input.
 A transport failure explicitly leaves the outcome unconfirmed. `_show_hint_line`, beside the
 charge line, prints the server's invitation (`X-Treg-Hint: review|feedback`; the older
-`X-Treg-Review: requested` still means review) as one stderr line per kind. Call responses
+`X-Treg-Review: requested` still means review) as one stderr line per kind. When a successful
+call to one provider's endpoint carries `X-Treg-Routed-Tool` (set by `routers/call.py`
+`_routed_alternative`: the routed `treg.<capability>` tool for the same job), it prints one more
+line pointing to that tool; `--json` puts it in `_treg.routed_tool`, and MCP returns `routed_tool`
+with a `suggestion` sentence beside the result, leaving the invitation `hint` slot alone. Call responses
 retain the existing `_show` formatting on stdout, including pretty-printed JSON.
 
 ## Instagram grants
