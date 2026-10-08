@@ -268,8 +268,17 @@ the hub is off on this registry the ids answer 404: use the routed endpoints bel
 <!--/hub-->
 
 <!--routed-->
-**Routed endpoints — when you WANT treg to choose.** `treg.<capability>` rows (today:
-`treg.people.email.find`) are first-party endpoints generated from the providers of one capability.
+**For a common job, call the routed tool, not a provider you remember.** Scraping a page
+(`treg.web.extract`), web search (`treg.web.search`), Google results (`treg.google.serp.organic`,
+`treg.google.serp.maps`), finding or verifying an email (`treg.people.email.find`,
+`treg.people.email.verify`) and most social profiles have a `treg.<capability>` tool. treg picks the
+provider (your own key first), falls back when one fails or misses, and charges only the answer it
+returns. A provider you used last week may not be the best choice today: prices and reliability
+change. Name a provider only when you need fields or options that only it has.
+
+**Routed endpoints — when you WANT treg to choose.** `treg.<capability>` rows (for example
+`treg.web.extract`, `treg.web.search`, `treg.google.serp.organic`, `treg.people.email.find`) are
+first-party endpoints generated from the providers of one capability.
 `POST /call/treg.people.email.find` with `{full_name, domain}` (or `first_name`+`last_name`+`domain`,
 or `linkedin_url`) and treg runs the best child — your own keys first, then cheapest per hit — and
 answers `{output, raw, _treg: {served_by, tried, charged_micro}}` with `X-Treg-Served-By`. A
