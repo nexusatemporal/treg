@@ -588,9 +588,44 @@ endpoints:
       currency: USD
       note: "charged on 2xx only; errors free"
     verified: 2026-07-28             # date of the last PASSING catalog_verify.py run; absent = unverified
+    added: '2026-07-28'              # REQUIRED: the UTC day this tool reached main; never changes
     example_response: examples/tikhub.tiktok.user.profile.json   # written by catalog_verify.py
     docs_url: https://docs.tikhub.io/…
 ```
+
+### `added` — the day a tool reached main
+
+Every tool row, core and extended, carries `added: 'YYYY-MM-DD'`: the **UTC** day the tool first
+became available on main. It lives on the row in the tool's own provider file, next to `verified:`
+(after `id:` when the row has none), and never in a shared dates file that every listing PR would
+conflict on. It is not `verified` (that moves on every re-check, and many rows have none) and not
+the provider's `source.curated` day.
+
+- **Rule A.** An existing tool keeps the day it reached main. A new tool takes the day its PR is
+  prepared; if the PR waits long, its author updates the new rows' dates before merging. All dates
+  are UTC days, so a tool may show `added` one day before a `verified` its author wrote in local
+  time.
+- **Never changes.** The date is keyed by tool id across the whole catalog, so a row promoted from
+  `<service>.extended.yaml` to core, or moved between files, keeps it. The `Catalog added dates`
+  workflow runs `scripts/catalog_added.py --base origin/<base>` on every pull request and fails,
+  listing the ids, when an existing id's date differs from the base branch. A deliberate change (a
+  wrong backfill, a renamed tool given its old id's date, a rule change) passes only with the
+  `added-date-change` label; outside CI, `--allow-change` is the same override.
+- **The helper.** `uv run python scripts/catalog_added.py` writes today's UTC date into every row
+  that has none and never touches an existing one; `--check` lists the rows without one. It
+  inserts one line per row as text, so comments and hand layout survive. `catalog_validate.py`
+  fails a row whose `added` is missing, not `YYYY-MM-DD`, or in the future, and names the helper.
+- **Ingest.** `carry_verification` carries `added` by id from every catalog file BEFORE its
+  method/path check: a tool whose route moved is still the tool that reached main that day. Only
+  an id the catalog has never had gets today's UTC date, so a re-import never re-dates a tool.
+- **Backfill.** `scripts/catalog_backfill_added.py` dated the existing rows once from the
+  first-parent history of main: the first merge day on which each id was present in any catalog
+  file. A branch that merged main into itself and was then fast-forwarded onto main puts its own
+  line on that history and hides main's merges of the period behind each "merge main into" commit,
+  so those lines of main are walked too and an id takes the earliest day any of them had it. Its report lists the big days, possible renames (an id leaving while another with the
+  same provider, method and path arrives), ids removed and re-added, and unplaceable rows; a
+  reviewed rename is applied with `--same-tool OLD=NEW`. The first catalog commit gives most of
+  the original catalog one shared date, which is correct.
 
 ### Domain sections — grouping endpoints for browse
 
@@ -1244,6 +1279,8 @@ Do these steps in order; each has a hard success criterion.
    `TREG_CATALOG_CRED` env var. It calls every endpoint's `test_request`, checks `expect`, writes
    the truncated example response to `examples/`, and prints PASS/FAIL per endpoint. Stamp
    `verified: <today>` ONLY on endpoints that passed — documented ≠ verified; docs lie.
+   Every new row also gets `added:` (`uv run python scripts/catalog_added.py` writes today's UTC
+   date where it is missing).
 8. **Scrub.** Read every captured example: replace anything personal that is not the public test
    target's own public data. The account-info endpoints of YOUR OWN key (quota, balance) must have
    emails/ids masked before commit.
