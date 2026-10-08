@@ -57,9 +57,26 @@ def phone_on(monkeypatch, platform_on):  # noqa: F811
 tools: list[tuple[str, str]] = []
 
 
+@pytest.fixture
+def quickenrich_on(monkeypatch, platform_on):  # noqa: F811
+    monkeypatch.setenv("TREG_PLATFORM_KEY_QUICKENRICH", "PLATFORM-QUICKENRICH-KEY")
+    monkeypatch.setenv("TREG_PLATFORM_KEY_HLRLOOKUP", "PLATFORM-HLR-KEY")
+    monkeypatch.setenv("TREG_PLATFORM_KEY_HLRLOOKUP_SECRET", "PLATFORM-HLR-SECRET")
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "quickenrich,hlrlookup")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def _quickenrich(phone, country) -> tuple[int, dict]:
+    return 200, {"success": True, "message": "Phone found", "code": 200,
+                 "data": {"employee_phone": phone, "employee_phone_type": "mobile", "country_code": country},
+                 "meta": {"credits_used": 1}}
+
+
 def _relay(answers: dict[str, list[tuple[int, dict]]], seen: list):
     async def relay(request, upstream_url, tool, secrets, client, **kwargs):
-        provider = "hlrlookup" if "hlrlookup" in upstream_url else "tomba"
+        provider = next((p for p in ("hlrlookup", "quickenrich") if p in upstream_url), "tomba")
         tools.append((provider, tool.name))
         body = b""
         async for chunk in request.body_stream():
@@ -162,6 +179,44 @@ async def test_a_number_not_written_internationally_is_never_sent(phone):
 ])
 def test_e164_digits_trusts_only_an_international_number(raw, digits):
     assert P.e164_digits(raw) == digits
+
+
+@pytest.mark.parametrize("phone,country,out", [
+    ("4155550142", "US", "+14155550142"), ("6135550142", "CA", "+16135550142"), (" 4155550142 ", "us", "+14155550142"),
+    ("4155550142", "GB", "4155550142"), ("4155550142", None, "4155550142"), ("4155550142", "", "4155550142"),
+    ("415555014", "US", "415555014"), ("14155550142", "US", "14155550142"), ("+14155550142", "US", "+14155550142"),
+    ("+447540822872", "US", "+447540822872"), ("0155550142", "US", "0155550142"),
+    ("415-555-0142", "US", "+14155550142"), ("(415) 555-0142", "US", "+14155550142"), ("415.555.0142", "CA", "+14155550142"),
+    ("415-555-01AB", "US", "415-555-01AB"), ("(415) 555-01423", "US", "(415) 555-01423"), ("1-415-555-0142", "US", "1-415-555-0142"),
+    ("+1 415 555 0142", "US", "+1 415 555 0142"), ("(015) 555-0142", "US", "(015) 555-0142"), (None, "US", None),
+])
+def test_with_country_code_adds_only_a_plan_it_fits(phone, country, out):
+    assert P.with_country_code(phone, country) == out
+
+
+@pytest.mark.parametrize("phone,country,out", [
+    ("4155550142", "US", "+14155550142"), ("6135550142", "CA", "+16135550142"),
+    ("4155550142", "MX", "4155550142"), ("4155550142", None, "4155550142"), ("415555014", "US", "415555014"),
+    ("14155550142", "US", "14155550142"), ("+14155550142", "US", "+14155550142"), ("(415) 555-0142", "US", "+14155550142"),
+])
+def test_quickenrich_output_gets_plus_one_and_raw_stays(phone, country, out):
+    adapter = catalog_store.load().adapters["quickenrich.people.phone.find"]
+    doc = _quickenrich(phone, country)[1]
+    assert adapter.from_upstream(doc)["phone"] == out
+    assert doc["data"]["employee_phone"] == phone, "raw is what QuickEnrich sent"
+
+
+async def test_a_quickenrich_us_hit_is_now_checked_live(clients: AsyncClient, quickenrich_on, monkeypatch):
+    seen = []
+    monkeypatch.setattr(call_service, "relay", _relay(
+        {"quickenrich": [_quickenrich("4155550142", "US")], "hlrlookup": [_hlr("LIVE", 2)]}, seen))
+    r = await clients.post(f"/call/{FIND}", json={"linkedin_url": "https://www.linkedin.com/in/example"}, headers=ON)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["output"]["phone"] == "+14155550142"
+    assert d["raw"]["data"]["employee_phone"] == "4155550142", "raw is relayed as QuickEnrich sent it"
+    assert seen[1][1]["telephone_number"] == "14155550142" and seen[1][1]["usa_status"] == "YES"
+    assert d["_treg"]["verification"]["verdict"] == "live" and d["_treg"]["verification"]["checked"] is True
 
 
 def test_starts_with():

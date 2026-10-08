@@ -126,7 +126,7 @@ contracts:
       linkedin_handle: "linkedin_handle(linkedin_url)"
     filters: {}
     output:
-      phone: {type: str, required: true, note: "as the provider formats it; E.164 when it offers one"}
+      phone: {type: str, required: true, note: "as the provider formats it; E.164 when it offers one, and +1 added to a 10-digit number the provider marks US or CA"}
       line_type: {type: str}
       country_code: {type: str}
     miss: "phone == null"

@@ -275,6 +275,22 @@ def e164_digits(v: Any) -> str | None:
     return digits if 7 <= len(digits) <= 15 else None
 
 
+# A national number is trusted only with a country whose numbering plan it fits exactly.
+_NATIONAL_PLANS = {"US": ("1", re.compile(r"[2-9]\d{9}")), "CA": ("1", re.compile(r"[2-9]\d{9}"))}
+
+
+def with_country_code(v: Any, country: Any) -> Any:
+    """`6175550142` or `(617) 555-0142` with country `US` → `+16175550142`; anything else comes back unchanged.
+
+    Only national digits (spaces, `-`, `.` and parentheses aside) that fit the plan of a country in
+    `_NATIONAL_PLANS` are rewritten."""
+    plan = _NATIONAL_PLANS.get(country.strip().upper()) if isinstance(country, str) else None
+    digits = re.sub(r"[\s\-.()]", "", v) if isinstance(v, str) else ""
+    if plan is None or not plan[1].fullmatch(digits):
+        return v
+    return f"+{plan[0]}{digits}"
+
+
 def starts_with(v: Any, prefix: Any) -> bool:
     return isinstance(v, str) and prefix is not None and v.startswith(str(prefix))
 
@@ -283,7 +299,7 @@ TRANSFORMS = {"values": values, "get": get_path, "null_if": null_if, "choose": c
               "dfs_location": dfs_location, "seranking_source": seranking_source, "lower": lower, "upper": upper,
               "list": as_list, "at_least": at_least, "at_most": at_most, "linkedin_handle": linkedin_handle, "linkedin_url": linkedin_url,
               "email_domain": email_domain, "host": host, "fmt": fmt, "obj": obj, "tca_filter": tca_filter, "csv": csv, "country_name": country_name,
-              "e164_digits": e164_digits, "starts_with": starts_with}
+              "e164_digits": e164_digits, "starts_with": starts_with, "with_country_code": with_country_code}
 
 _CALL = re.compile(r"^(\w+)\((.*)\)$")
 _DIV = re.compile(r"^(.+?)\s*/\s*(\d+(?:\.\d+)?)$")

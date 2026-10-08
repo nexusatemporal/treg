@@ -2456,10 +2456,11 @@ adapters:
     out: {email: "null_if(data.email, '', 'n/a', 'null', 'none')", first_name: data.first_name, last_name: data.last_name}
     miss: "null_if(data.email, '', 'n/a', 'null', 'none') == null"
   # country_code is the provider's company-context country, not proof of the phone owner's location.
+  # A bare 10-digit number with country US or CA gets its +1, so the routed live check can read it.
   quickenrich.people.phone.find:
     accepts: [[linkedin_url], [first_name, last_name, domain]]
     in: {linkedin_url: queryParams.linkedin_url, first_name: queryParams.first_name, last_name: queryParams.last_name, domain: queryParams.company_url}
-    out: {phone: "null_if(data.employee_phone, '', 'n/a', 'null', 'none')", line_type: "null_if(data.employee_phone_type, '', 'n/a', 'null', 'none')", country_code: "null_if(data.country_code, '', 'n/a', 'null', 'none')"}
+    out: {phone: "with_country_code(null_if(data.employee_phone, '', 'n/a', 'null', 'none'), data.country_code)", line_type: "null_if(data.employee_phone_type, '', 'n/a', 'null', 'none')", country_code: "null_if(data.country_code, '', 'n/a', 'null', 'none')"}
     miss: "null_if(data.employee_phone, '', 'n/a', 'null', 'none') == null"
   quickenrich.people.enrich:
     accepts: [[email]]

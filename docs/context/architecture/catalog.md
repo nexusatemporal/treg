@@ -1889,6 +1889,10 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   and `skip_reason` skip a hit before any call: a phone not written internationally
   (`e164_digits`) is `not_international`, because HLR reads a national number's first digits as a
   country code. The adapter sends `usa_status` only for `+1` numbers and never reads a cache.
+  A finder that sends bare national digits plus a country field can add the code in its `out`:
+  `with_country_code(phone, country)` turns a 10-digit US or Canadian number (spaces, `-`, `.`
+  and parentheses aside) into `+1…` and
+  leaves every other value as it came (QuickEnrich). `raw` is never touched.
   `routed: false` declares an
   admission-only contract: its adapters verify like any other (which is what the archive's
   `has_result_rules` reads), but no `treg.<capability>` row is ever generated from it. For a
@@ -1929,7 +1933,8 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   (first non-empty argument, else the last one),
   `/ N`, `==`/`!=` against literals, and named transforms (`split_first`, `split_last`, `join`,
   `has_type`, `len`, `list`, `obj`, `fmt`, `csv`, `lower`/`upper`, `at_least`, `at_most`, `null_if`, `choose`, `linkedin_handle`/
-  `linkedin_url`, `email_domain`, `host`, `dfs_location`, `seranking_source`, `tca_filter`).
+  `linkedin_url`, `email_domain`, `host`, `dfs_location`, `seranking_source`, `tca_filter`,
+  `e164_digits`, `starts_with`, `with_country_code`).
   `values` reads rows from object-keyed or list responses; `get` applies dotted/indexed lookup
   to another expression result (for example, the first company in a domain-keyed response).
   These are generic helpers, not provider-specific rewrites.

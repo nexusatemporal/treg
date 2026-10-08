@@ -309,7 +309,8 @@ On `treg.people.phone.find` the same header checks the line with HLR Lookup's li
 (`hlrlookup.people.phone.verify`, your own HLR key first): `verdict` is `live`, `dead` or
 `unknown`. A live line is not proof the number is this person's; for a US number,
 `trestleiq.people.contact.verify` checks the name. A number not written internationally (`+` or
-`00` first) is not checked: `reason: not_international`, nothing charged. A dead number is still
+`00` first) is not checked: `reason: not_international`, nothing charged. treg adds `+1` to a bare
+10-digit number only when the provider itself marks it US or Canadian. A dead number is still
 returned, with its verdict.
 <!--hub-->
 `treg-hub.verified-email` does find + verify in one call and bills its fee only on a usable email.
