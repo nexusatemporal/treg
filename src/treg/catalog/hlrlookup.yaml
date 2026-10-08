@@ -22,7 +22,7 @@ endpoints:
     path: /apiv2/hlr
     body_allowlist: true
     name: Check if a phone number is live
-    summary: Performs a live HLR lookup, returning number type, live status, original and current network, and porting information.
+    summary: "Performs a live HLR lookup, returning number type, live status, original and current network, and porting information. Warning: a national number sent without input_format can be read as another country's number (a US 617... number as an Australian 61... number), and that lookup is still charged."
     input:
       bodyType: json
       body:
