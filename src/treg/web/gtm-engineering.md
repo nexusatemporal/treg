@@ -145,8 +145,8 @@ Tiers on the 27 accounts: A (fit at least 60% and 2+ open GTM roles in 60 days) 
 
 Study, 6 Oct 2026: 57 US startups that announced a seed to Series B round between mid-August and early October 2026,
 against similar startups whose last round was in 2025 and for which our source showed no 2026 round (54 of 61 had any
-data). Job postings by first-seen date and news by found date, 90 to 7 days before the reference date (the
-announcement, or the median announcement date for the comparison group). GTM roles: sales, marketing, growth, revenue
+data). Job postings by first-seen date (posted date if missing) and news by found date, 90 to 7 days before the
+reference date (the announcement, or the median announcement date for the comparison group). GTM roles: sales, marketing, growth, revenue
 operations, business development, partnerships, customer success. "Hiring sped up": two or more postings and more than
 in the 90 days before that.
 
@@ -159,7 +159,7 @@ in the 90 days before that.
 | Hiring sped up | 25% | 22% |
 | Was in the news | 26% | 54% |
 
-Hiring did not separate the groups; recorded news was more common in the group that did not raise. One source,
+Hiring did not separate the groups; recorded news was more common in the comparison group with no round found. One source,
 incomplete coverage, an unmatched comparison: company age and coverage could explain the news gap, and we did not
 establish the cause. No evidence of a hiring signal, not proof that none exists.
 Play: act on the funding announcement itself, and check any timing signal on your own wins against losses before it
