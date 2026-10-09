@@ -144,22 +144,39 @@ takes every team with `archive_opt_out_at` set and `archive_purged_at` NULL, and
 `org:`/`conn:` scopes, with its snapshots and the request shape the key row carries, plus every
 `ArchiveKeyOrg` mark of the team. A platform-key answer is a public question and stays; once the
 marks are gone nothing in the archive names the team. Objects go before rows, per batch:
-`teams.archive_bodies_only_under` judges which content hashes no other key's snapshot shares (a
-body is content-addressed and deduplicated across keys), those objects are deleted through the
-store's one `delete`, and only then are the rows deleted. A failed object delete stops the pass
-before the rows, so the next pass retries from them; a deleted row would have left its object
-behind for good. The endpoint running totals move with the rows. Opting back in clears both
-timestamps; nothing erased comes back, and a team that opted back in before the sweep reached it
-is left unmarked (what it records from now on is not what was erased).
+`teams.archive_bodies_only_under` judges, in one anti-join, which content hashes no other key's
+snapshot shares (a body is content-addressed and deduplicated across keys), those objects are
+deleted through the store's one `delete`, and only then are the rows deleted. A failed object
+delete stops the pass before the rows, so the next pass retries from them; a deleted row would
+have left its object behind for good. The endpoint running totals move with the rows, taken from
+what each DELETE returned rather than from a count read beforehand, so two erasers on the same
+rows (the sweep racing an owner delete, two instances in a rolling deploy) subtract once.
 
-Deleting a team runs the same erasure: the owner route calls `erase_org` after its request
-session has let go of its connection and before the cascade, so a failure keeps the team for a
-retry; `cascade_delete_org` itself deletes the rows (the archive keys no foreign key at the team,
-so the cascade's FK-walking guard test never sees them), which keeps every other deletion path
-(admin force-delete, the sandbox reaper, the demo reset) from leaving rows behind, at the price of
-objects those paths do not clear. Out of scope, deliberately: the terminal evidence of async tasks
-(`treg://asynctasks/<call_id>`, settlement evidence under a public key), the `callrecord` audit
-trail and the idempotency replay store, which is the caller's own request and has its own window.
+The archive has other writers, and the sweep is held against them three ways. **Bound to one
+objection**: `erase_org` carries the `archive_opt_out_at` it read and re-reads the team's
+standing before every destructive pass; a team that opted back in since (or out again, a new
+objection) stops the old erasure untouched, and the completion mark is written only where the
+objection is still the same one. **Late writers refuse**: the call path gated on the team's
+standing as the call began, so a call in flight at the opt-out can still finish; the recorder
+(`archive._store`, before any upload) and the settle mark (`note_org_use_in_transaction`)
+therefore re-read the org row and write nothing for a team that is opted out or gone.
+**Completion waits**: the rows are erased at once, but `archive_purged_at` is set only once the
+objection is older than `archive_erasure.grace_s()` (a call's lifetime plus a margin), so nothing
+from before the objection can land after the team was told its erasure is done. Opting back in
+clears both timestamps; nothing erased comes back. One race is accepted and documented in the
+module: between judging a body an orphan and deleting it, another team can record the identical
+bytes; its snapshot then reads as "bytes not on file", which every reader tolerates as a miss.
+
+Deleting a team runs the same erasure: the owner route sets the opt-out first and commits it (the
+fence that makes late writers refuse), calls `erase_org` once its request session has let go of
+its connection and before the cascade, so a failure keeps the team (opted out) for a retry;
+`cascade_delete_org` itself deletes the rows (the archive keys no foreign key at the team, so the
+cascade's FK-walking guard test never sees them), which keeps every other deletion path (admin
+force-delete, the sandbox reaper, the demo reset) from leaving rows behind, at the price of
+objects those paths do not clear. Out of scope, deliberately, and said so in every user-facing
+sentence: the terminal evidence of async tasks (`treg://asynctasks/<call_id>`, settlement
+evidence under a public key with no team provenance), the `callrecord` audit trail and the
+idempotency replay store, which is the caller's own request and has its own window.
 
 ## Pricing a hit
 

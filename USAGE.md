@@ -240,8 +240,9 @@ then get the 503 above); `treg org overflow` shows the setting. Own keys are nev
 
 `treg org archive off` takes your team out of treg's archive of answers: no call of yours is answered
 from a stored answer or recorded into one, every call reaches the provider at the live price (no
-free or repeat-priced hits), and what the team had stored is erased. `treg org archive` shows the
-setting and whether that erasure is still pending; `treg org archive on` opts back in.
+free or repeat-priced hits), and the answers stored for the team are erased; call records and the
+completion evidence of async tasks stay. `treg org archive` shows the setting and whether that
+erasure is still pending; `treg org archive on` opts back in.
 
 ### Routed endpoints — let treg choose the provider
 

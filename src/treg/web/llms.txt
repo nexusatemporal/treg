@@ -377,7 +377,8 @@ Money notes for agents:
   <seconds>` to accept only a younger answer. A team admin can opt the whole team out of the
   archive (`treg org archive off`, `PATCH /orgs/{id}/settings {"archive": false}`): no call of
   that team is then answered from or recorded into it, every call is live at full price, and
-  what the team had stored is erased. An idempotency replay is different
+  the answers stored for the team are erased (call records and async-task completion evidence
+  stay). An idempotency replay is different
   (`X-Treg-Idempotent-Replay: true`). Empty results are the provider's own semantics — treg does
   not normalise "no data" vs "no coverage" vs "unsupported target".
 - Out of balance → HTTP **402** with a machine-actionable body: `balance_micro`,

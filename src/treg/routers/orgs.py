@@ -894,9 +894,12 @@ async def delete_org(
     if confirm != org.slug:
         raise HTTPException(status_code=422, detail=(
             f"to delete this team, confirm with its slug: ?confirm={org.slug}"))
-    # The team's archived answers go with it (archive.md, "Opting out"). The object phase runs
-    # on its own sessions after this one has let go of its connection (the commit below ends the
-    # read above), and a failure there keeps the team, so the owner can simply try again.
+    # The team's archived answers go with it (archive.md, "Opting out"). The opt-out is set
+    # first and committed, so a call still in flight is refused by the recorder and the settle
+    # mark; the object phase then runs on its own sessions after this one has let go of its
+    # connection, and a failure there keeps the team (opted out), so the owner simply tries again.
+    if org.archive_opt_out_at is None:
+        org.archive_opt_out_at = _utcnow_naive()
     await db.commit()
     await archive_erasure.erase_org(org_id)
     await teams.cascade_delete_org(org, db)

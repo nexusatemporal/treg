@@ -154,7 +154,8 @@ Notes:
   costs 10%, and a hit on your own key is free. `Cache-Control: no-cache` forces a live call;
   `X-Treg-Max-Age: <seconds>` accepts only a younger answer. A team admin can opt the team out
   (`treg org archive off`, or the Team page): then no call is answered from or recorded into the
-  archive, every call is live at full price, and what the team had stored is erased.
+  archive, every call is live at full price, and the answers stored for the team are erased
+  (call records and async-task completion evidence stay).
 - HTTP **503** `provider_capacity_unavailable` = treg's own account for that provider is out
   (not your balance; nothing charged). Body has `resets_at` and `alternatives` (same capability,
   other providers) — choose one, or use your own key. treg never switches providers for you.

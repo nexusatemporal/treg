@@ -619,6 +619,12 @@ async def _store(
     try:
         kh = key_hash or cache_key(method, endpoint_id, url, caller_body, headers, scope=scope)
         ch = body_hash or content_hash(body)
+        # The call path gated on the team's standing as the call BEGAN; a team can opt out of the
+        # archive (archive.md, "Opting out") while its call is in flight, and the erasure sweep
+        # must never be overtaken by a late recording. Re-read before anything is uploaded.
+        if origin_org_id is not None and await _org_refuses_recording(origin_org_id):
+            reason = "org_opt_out"
+            return
         plan = plan or _write_plan(endpoint_id, body, origin)
         if plan.storage in ("both", "r2"):
             if origin == "async_terminal":
@@ -907,6 +913,20 @@ async def _observe_change(previous_id: int, body: bytes, endpoint_id: str, provi
     except Exception:
         # Observation is optional and happens after commit. Never log provider bytes/errors.
         change_outcomes["observation_failed"] += 1
+
+
+async def _org_refuses_recording(org_id: int) -> bool:
+    """True when the team has opted out of the archive, or no longer exists: both mean an
+    own-credential answer must not be recorded for it now, whatever the call path saw."""
+    from sqlalchemy import select
+
+    from .infra.db import background_session_maker
+    from .models import Org
+
+    async with background_session_maker() as s:
+        row = (await s.execute(
+            select(Org.archive_opt_out_at).where(Org.id == org_id))).first()
+    return row is None or row[0] is not None
 
 
 async def _lock_archive_key(s, key_id: int):
@@ -1490,8 +1510,14 @@ async def note_org_use_in_transaction(db, org_id: int, key_hash: str) -> None:
     from sqlalchemy import select, update
     from sqlalchemy.exc import IntegrityError
 
-    from .models import ArchiveKeyOrg
+    from .models import ArchiveKeyOrg, Org
 
+    # A team that opted out of the archive while this call was in flight gets no mark: the
+    # erasure sweep removes its marks, and a settle landing after it must not put one back.
+    standing = (await db.execute(
+        select(Org.archive_opt_out_at).where(Org.id == org_id))).first()
+    if standing is None or standing[0] is not None:
+        return
     now = _utcnow()
     existing = (await db.execute(
         select(ArchiveKeyOrg.id).where(ArchiveKeyOrg.org_id == org_id,
