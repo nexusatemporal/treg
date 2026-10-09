@@ -29,7 +29,7 @@ export default {
 
 <template>
 <div class="pl" :class="{dopen:!!drawerEp}">
-  <div v-if="platLoading || catalogArm==='pending'" class="pl-empty">Loading the catalog…</div>
+  <div v-if="platLoading" class="pl-empty">Loading the catalog…</div>
   <div v-else-if="platErr" class="pl-empty">{{platErr}}</div>
 
   <!-- THE SHELF -->

@@ -5,6 +5,8 @@ sources:
   - src/treg/bootstrap.py
   - src/treg/bootstrap_handlers.py
   - src/treg/bootstrap_http.py
+  - src/treg/worker.py
+  - src/treg/infra/money_trace_runner.py
   - src/treg/call_surface.py
   - src/treg/application/connect.py
   - src/treg/domain/identity/mcp_oauth.py
@@ -75,6 +77,14 @@ shared Task before database and HTTP resources disappear. Once the fault handler
 lifespan emits `analytics.capture_service_started(role)`, one `service_started` event per process
 carrying the `build` and `archive_config` fingerprints every server event has (see
 [data-model](data-model.md#product-analytics-writer-analyticspy)).
+
+Every role also owns an `infra.money_trace_runner` lifespan, independent of analytics enablement.
+It samples in-process money transactions and event-loop wakeup delay, and sends bounded diagnostic
+records to a dedicated log thread. Shutdown stops it after money-producing background work drains
+and before analytics drains. The worker command dispatcher uses the same lifecycle for every
+command, including asynchronous settlement; its final local summary has a bounded shutdown wait.
+The [data-model](data-model.md#product-analytics-writer-analyticspy) fragment defines the trace's
+coverage, privacy and loss counters.
 
 `bootstrap_handlers.py` owns the app-wide pool-saturation and HTTP-exception adapters.
 `call_surface.split_call_path`

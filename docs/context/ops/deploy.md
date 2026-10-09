@@ -135,6 +135,14 @@ through. Live values and production sizing belong in the private operator runboo
 headroom. Resize from measurements, one pool at a time. A larger pool does not repair a slow scan,
 lock queue, disk-bound database or missing index.
 
+Web roles and worker commands also run local money-transaction diagnostics independently of the
+PostHog key. Verify fresh `money_trace_gauge` records for each deployed build and process, including
+tracking counts, sample age and drop counters. `money_txn_slow` and `money_txn_end` correlate backend
+PIDs with application transaction IDs and stages; join within their timestamp intervals because
+connections are reused. Read the coverage and loss limitations in
+[data-model](../architecture/data-model.md#product-analytics-writer-analyticspy) before interpreting
+missing records. Deployment requires no schema migration or new database privileges.
+
 All pools use `pool_pre_ping=True`, `pool_recycle=300` and `pool_timeout=5`. A request that gets no
 slot in time receives `503 {"treg_saturated": true}` with `Retry-After: 2` through
 `bootstrap_handlers._pool_saturated`. A `/call/` holds no connection during the upstream round trip.

@@ -63,10 +63,6 @@ platUrl(slug, cap){ const tail=cap ? '/'+encodeURIComponent(cap) : '';
       if(r.slug) this.openPlatform(r.slug, true); else this.go('catalog', true); },
 openPlatform(slug, fromPop, cap){ this.resetConfirms();
       if(cap===undefined) cap = fromPop ? this.platCapFromLocation() : null;
-      // The ledger has no comparison pages: the control arm reads one's address as its shelf.
-      if(this.catalogLegacy) cap=null;
-      this.catalogEnroll(cap).then(()=>{ if(this.view==='platform' && this.platSlug===slug)
-        this.catalogTrack(cap ? 'catalog_comparison_viewed' : 'catalog_platform_viewed', cap ? {compare:cap} : {}); });
       // Moving between a shelf and one of its comparisons keeps the loaded shelf: the page is the same
       // payload read another way, so only the address and the view state change.
       const same = this.view==='platform' && this.platSlug===slug && (this.platData || this.platLoading);
@@ -76,6 +72,7 @@ openPlatform(slug, fromPop, cap){ this.resetConfirms();
       if(!same){ this.platEx={}; this.platQ=''; this.epInfo={};
         if(this.find.scope) this.findExit(); }     // a shelf's answer belongs to that shelf
       this.platComparisonSort={key:'price', dir:'asc'};
+      this.catalogTrack(cap ? 'catalog_comparison_viewed' : 'catalog_platform_viewed', cap ? {compare:cap} : {});
       // A public visitor stays on the indexable /catalog/<slug> URL; a signed-in one keeps the
       // in-app hash route. Same view either way — only the address bar differs.
       if(!fromPop) history.pushState({platform:slug}, '', this.platUrl(slug, cap));
@@ -458,11 +455,4 @@ setEpTab(e, tab){
       // is otherwise one word, and a phone-width price cell cannot hold it.
       if(typeof c.usd_min==='number' && c.usd_min<c.usd) return '$'+this.usdNum(c.usd_min)+'-\u200b$'+this.usdNum(c.usd)+'/'+unit;
       return '$'+this.usdNum(c.usd)+'/'+unit; },
-costTitle(c){ if(!c) return 'The catalog has no price for this endpoint';
-      if(c.display_unit) return this.costLabel(c)+(c.note ? ' — '+c.note : '');
-      const nat=this.nativeAmount(c);
-      return [c.note,
-              nat ? 'billed as '+nat+'/'+this.priceUnit(c.type)+', converted at the catalog’s FX rate' : '',
-              c.value==null&&c.type!=='free' ? 'billed '+c.type.replace(/_/g,' ')+' — the provider does not publish the rate, check your plan in their dashboard' : ''].filter(Boolean).join(' — ')
-        || 'What this endpoint costs at the provider'; }
 }

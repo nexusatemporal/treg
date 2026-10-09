@@ -115,8 +115,9 @@ this page keeps what no single file shows. The look follows the root `design.md`
   <platform> for …", and "Search all tools" (`findEverywhere`) moves to the Catalog page with the box
   prefilled and the same words asked unscoped. "Request it" appears only on an unscoped gap (and on
   v1's empty answers, which carry no reason).
-- The `catalog-v2` experiment shows the old ledger (`LegacyPlatformPage.vue`) to its control arm; it
-  ends by deleting that page, `state/catalogExperiment.js` and the arm checks.
+- Every catalog surface (shelf, comparison, provider page, Catalog index) sends one event set from
+  `state/catalogEvents.js`: `catalog_platform_viewed`, `catalog_comparison_viewed`,
+  `catalog_tool_opened`, and `catalog_action` for try, copy, connect, own key and docs.
 
 ## Tutorial, top bar, referrals
 
