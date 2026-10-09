@@ -501,9 +501,11 @@ parameters compared with timestamp columns follow the same constraint as inserte
 accidental writes, not deliberate SQL that disables the settings. The engine is included in
 disposal, but never schema writes; PostgreSQL also exposes its `read` pool in telemetry.
 An empty URL aliases the existing primary session maker with unchanged write behavior;
-configured datasource failures propagate without primary fallback. No business caller uses this
-datasource yet. Provisioning/replication, replica lag and each caller's write boundaries must be
-handled before opting in; a URL alone does not synchronize databases or add other dialect support.
+configured datasource failures propagate without primary fallback. `/admin/errors` opts in through
+`get_admin_read_session`, which instead uses the admin primary pool when no read URL is configured.
+Its authorization remains on the primary and releases its connection before reading evidence and
+org names. Provisioning/replication, replica lag and each caller's write boundaries must be handled
+before opting in; a URL alone does not synchronize databases or add other dialect support.
 See [deploy](../ops/deploy.md) § Optional read replica for configuration and connection budgeting.
 
 ## Alembic execution and the adoption floor

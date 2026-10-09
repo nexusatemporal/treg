@@ -20,7 +20,7 @@ from .. import reconcile
 from ..application import evidence_retention
 from ..config import get_settings
 from ..infra import kv
-from ..infra.db import get_admin_session
+from ..infra.db import get_admin_read_session, get_admin_session
 from ..domain import money
 from ..models import ArchiveEndpointStat, ArchiveKey, ArchiveSnapshot, Bundle, CallRecord, EndpointDayStat, LedgerEntry, Membership, Org, Referral, Secret, Tool, User
 from ..timeutil import as_naive as _as_naive
@@ -284,7 +284,7 @@ _ERROR_EVIDENCE_EXPIRED = evidence_retention.ERROR_EVIDENCE_EXPIRED
 async def admin_errors(
     days: int = 7, limit: int = 100, provider: str | None = None, status: int | None = None,
     tier: str | None = None,
-    _: str = Depends(require_superadmin), db: AsyncSession = Depends(get_admin_session),
+    _: str = Depends(require_superadmin), db: AsyncSession = Depends(get_admin_read_session),
 ) -> dict:
     """Failed calls with the evidence to explain them — the caller's request and the provider's own
     answer (see models.CallRecord.error_request).
@@ -295,6 +295,8 @@ async def admin_errors(
     Read-only. Ageing is the `treg-worker admin purge-evidence` cron's job
     (application/evidence_retention.py); until it has run, a row older than the window is shown as
     expired with no evidence, so a late schedule never widens what this view reveals.
+    Evidence and org names may lag when a read database is configured; authorization stays on
+    the primary.
     """
     cutoff = evidence_retention.cutoff()
     since = _utcnow_naive() - timedelta(days=max(1, min(days, 90)))
