@@ -148,8 +148,11 @@ the request pool with no connection held across object I/O (non-negotiable 3):
 `teams.archive_bodies_only_under` judges, in one anti-join, which content hashes no other key's
 snapshot shares (a body is content-addressed and deduplicated across keys), those objects are
 deleted through the store's one `delete` and forgotten by the in-process upload cache
-(`archive_bodies.forget`, so an identical answer recorded later uploads again), and only then are
-the rows deleted. A failed object delete stops the pass before the rows, so a retry starts from
+(`archive_bodies.forget`), and only then are the rows deleted. Another process's upload cache
+cannot be told, so the store is no longer append-only for anyone: `archive_bodies.prepare` trusts
+a remembered upload only after one `head` confirms the object is still there (bounded by
+`archive_r2_read_timeout_s`; a miss or an unanswered HEAD uploads again), so an identical answer
+recorded after an erasure never commits a pointer to bytes that are gone. A failed object delete stops the pass before the rows, so a retry starts from
 them; a deleted row would have left its object behind for good. The endpoint running totals move
 with the rows, taken from what each DELETE returned rather than from a count read beforehand, so
 two erasers on the same rows subtract once. One race is accepted and documented in the module:

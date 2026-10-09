@@ -238,10 +238,11 @@ treg-owned aggregator account — same request, same response shape, the relay's
 `X-Treg-Served-Via: overflow:<name>` on the response. `treg org overflow off` opts your team out (calls
 then get the 503 above); `treg org overflow` shows the setting. Own keys are never relayed.
 
-`treg org archive off` takes your team out of treg's archive of answers: no call of yours is answered
-from a stored answer or recorded into one, and every call reaches the provider at the live price (no
-free or repeat-priced hits). `treg org archive` shows the setting; `treg org archive on` opts back in.
-Answers already stored for the team are erased when the team is deleted, or on request.
+`treg org archive off` takes your team out of treg's archive of answers: no new call of yours is
+answered from a stored answer or recorded into one, so metered calls lose the repeat price (own keys
+stay free as always). `treg org archive` shows the setting; `treg org archive on` opts back in.
+Answers already stored for the team are erased when the team is deleted, or on request; call records
+and async-task completion evidence are kept as before.
 
 ### Routed endpoints — let treg choose the provider
 

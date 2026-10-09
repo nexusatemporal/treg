@@ -516,9 +516,10 @@ export default {
                   <p class="sub" style="margin:4px 0 8px;font-size:12px">
                     treg keeps answers to the exact questions your agents ask so a repeat can be served
                     from storage: free on your own keys, at a reduced price on treg's. Turn it off and
-                    every call goes to the provider live at the full price, and no answer is stored for
-                    this team. Answers already stored are erased when the team is deleted, or on
-                    request through support.
+                    new calls skip that storage both ways: none is answered from it (so no repeat
+                    discount on treg's keys; your own keys stay free as always) and none is stored.
+                    Answers already stored are erased when the team is deleted, or on request through
+                    support. Call records and async-task completion evidence are kept as before.
                   </p>
                   <div class="field" style="max-width:560px;align-items:center">
                     <label class="tgl" :title="capCfg.archive?'archive on — click to opt out':'archive off — click to opt back in'">

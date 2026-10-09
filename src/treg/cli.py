@@ -4555,9 +4555,9 @@ def cmd_org_overflow(args, cfg) -> None:
 
 
 def cmd_org_archive(args, cfg) -> None:
-    """Show or set whether this team takes part in treg's archive of answers. Off = none of the
-    team's calls is answered from or recorded into the archive; every call reaches the provider at
-    the live price."""
+    """Show or set whether this team takes part in treg's archive of answers. Off = no new call of
+    the team's is answered from or recorded into the archive, so metered calls lose the repeat
+    price; own keys stay free."""
     with _client(cfg) as c:
         org_id = _active_org_id(cfg, c)
         if org_id is None:
@@ -4571,8 +4571,8 @@ def cmd_org_archive(args, cfg) -> None:
         return
     on = r.json().get("archive", True)
     print(f"\n  archive: {_A if on else _AM}{'on' if on else 'off'}{_R}"
-          f"  {_M}(off: every call is live at the live price; nothing is served from or stored in "
-          f"the archive for this team){_R}\n")
+          f"  {_M}(off: new calls are neither answered from nor stored in the archive; metered "
+          f"calls lose the repeat price){_R}\n")
 
 
 def cmd_org_budget_set(args, cfg) -> None:
@@ -6359,7 +6359,7 @@ def build_parser() -> argparse.ArgumentParser:
              "treg org overflow", "treg org overflow off")
     oov.add_argument("state", nargs="?", choices=["on", "off"], help="omit to show"); oov.set_defaults(fn=cmd_org_overflow)
     oar = mk(og, "archive", "Show or set whether this team takes part in treg's archive of answers; off "
-                            "makes every call live at the live price (admin+).",
+                            "means new calls are neither answered from nor stored in it (admin+).",
              "treg org archive", "treg org archive off")
     oar.add_argument("state", nargs="?", choices=["on", "off"], help="omit to show"); oar.set_defaults(fn=cmd_org_archive)
     osr = mk(og, "set-role", "Change a member's role (owner only).", "treg org set-role 5 admin")

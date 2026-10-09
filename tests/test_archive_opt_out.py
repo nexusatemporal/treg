@@ -11,7 +11,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from conftest import verified_signup
-from treg import archive, audit, bootstrap
+from treg import archive, archive_bodies, audit, bootstrap
 from treg.application import archive_erasure
 from treg.application.call import service as call_service
 from treg.infra.db import session_maker
@@ -202,9 +202,18 @@ async def test_erasure_deletes_orphaned_objects_but_keeps_shared_ones(
         await clients.get(f"/call/{EP}?aweme_id=11")
         await archive.drain()
         assert only_a in store.objects
+        # Another process's cache cannot be told; its dedup path asks the store first. Simulate
+        # the stale entry: the object is deleted behind the cache's back, and the next identical
+        # answer is uploaded again rather than pointed at nothing.
+        store.objects.pop(only_a)
+        assert only_a in archive_bodies._uploaded
+        _vendor_says(monkeypatch, b'{"only": "a"}')
+        await clients.get(f"/call/{EP}?aweme_id=12")
+        await archive.drain()
+        assert only_a in store.objects
         async with session_maker() as s:
             left = (await s.execute(select(ArchiveSnapshot))).scalars().all()
-        assert len(left) == 2 and all(row.content_hash in store.objects for row in left)
+        assert len(left) == 3 and all(row.content_hash in store.objects for row in left)
     finally:
         await archive.drain()
         bootstrap.configure_archive_object_store(None)
