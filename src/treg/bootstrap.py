@@ -599,6 +599,8 @@ def _emit_money_timings() -> None:
                     }, separators=(",", ":")))
     except Exception:  # noqa: BLE001 - diagnostics must not break a gauge or shutdown
         pass
+    from .infra.money_admission_reporting import emit_snapshot
+    emit_snapshot(role="web")
 
 
 async def pool_gauge(*, sample_s: float = _POOL_GAUGE_SAMPLE_S,

@@ -6,12 +6,15 @@ from types import SimpleNamespace
 import pytest
 
 from treg import analytics, bootstrap
-from treg.infra import money_timing
+from treg.infra import money_admission, money_timing
 
 
 @pytest.fixture
 def clock(monkeypatch):
     now = [0.0]
+    # The shared emitter also drains admission; unrelated earlier calls are not this window.
+    monkeypatch.setattr(money_admission, "_windows", {})
+    monkeypatch.setattr(money_admission, "_current", {})
     monkeypatch.setattr(money_timing, "_clock", lambda: now[0])
     monkeypatch.setattr(money_timing, "_opened", 0.0)
     monkeypatch.setattr(money_timing, "_windows", {})

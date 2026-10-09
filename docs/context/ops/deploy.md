@@ -17,6 +17,8 @@ sources:
   - src/treg/web/selfhost.sh
   - src/treg/config.py
   - src/treg/infra/db.py
+  - src/treg/infra/money_admission.py
+  - scripts/bench_money_admission.py
   - src/treg/email.py
   - src/treg/audit.py
   - scripts/dev-local.sh
@@ -241,6 +243,44 @@ subsystems. Credentials must stay in the deployment secret store. `TREG_PLATFORM
 shared-serving allow-list. Most providers also require a configured platform key. A live-verified
 free endpoint declared `platform_auth: anonymous` needs only the allow-list because treg injects no
 provider credential.
+
+## Optional money admission
+
+`TREG_MONEY_ADMISSION_ENABLED` defaults to `false`. Enabling it requires a shared Redis-compatible
+store at `TREG_KV_URL`; all participating web and money-worker processes must use the same store
+and rollout settings. No database migration or additional database privileges are required.
+
+- `TREG_MONEY_ADMISSION_ORG_IDS` is a JSON array of positive Org IDs. A non-empty array enables
+  admission only for those orgs; `[]` covers all orgs when the feature is enabled.
+- `TREG_MONEY_ADMISSION_WAIT_S` defaults to 5 seconds and bounds the complete local/Redis
+  acquisition attempt. Cleanup is separately bounded by the KV operations. Exhausting this
+  budget falls back to the existing database path; it does not reject or discard settlement.
+- `TREG_MONEY_ADMISSION_LEASE_S` defaults to 15 seconds. The owner renews while acquiring or using
+  its leases and deletes only leases with its token. Expiry, lost renewal or a Redis outage can
+  admit overlapping database transactions, so existing database locks remain authoritative.
+
+Deploy compatible code first with admission disabled to collect the same eligible-operation
+baseline, then opt in a small Org set. Compare `money_admission_gauge` wait and end-to-end durations,
+fallback/lease-loss counters, and the existing pool, money-operation and database-failure signals
+under comparable load before expanding. Whole-session serialization can reduce hot-org throughput
+even when it improves connection occupancy, so reduced lock-wait time alone is not rollout
+acceptance. Defaults are acquisition bounds, not workload sizing recommendations. Disable the
+feature to restore the original database admission path; mixed
+settings or old writers weaken isolation but do not remove accounting's database protection.
+There is no global money concurrency cap, and unrelated orgs can still collectively fill a pool.
+See [money](../architecture/money.md#optional-admission-before-the-settlement-session) for exact
+operation coverage and [data-model](../architecture/data-model.md#product-analytics-writer-analyticspy)
+for aggregate boundaries and interpretation.
+
+`tests/test_money_admission_postgres.py` uses real disposable loopback PostgreSQL and Redis via
+`TREG_TEST_DB_URL` and `TREG_TEST_KV_URL`; without these it skips instead of contacting a service.
+The PostgreSQL CI job supplies both services. `scripts/bench_money_admission.py` compares disabled
+and enabled synthetic settlement workloads using the same variables, with database names required
+to start with `treg_admission_test`. It resets that disposable schema. Its timings are local
+synthetic evidence, not a production replay or a guarantee of deployed throughput. Benchmark
+clients use separate Redis connections and local mutex maps within one event loop; this exercises
+Redis contention without a shared local mutex hiding it, but is not an operating-system
+multi-process load or failure test.
 
 ## Safe local mode
 

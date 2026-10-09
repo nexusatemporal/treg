@@ -324,6 +324,8 @@ class MarketplaceCall:
     max_cost_micro: int | None = None  # remaining caller ceiling, inherited by overflow
     params_hash: str = ""
     call_id: str | None = None      # the ledger hold, once reserved (metered calls only)
+    payer_org_id: int | None = None  # captured from the trusted caller when reserving
+    reserved_micro: int | None = None  # the held amount; None for legacy in-memory callers
     # The call rides a REGISTRY OAUTH CONNECT of a provider that bills treg's app per use (X's
     # pay-per-use: the app owner pays whoever's token made the call). Orthogonal to `tier` — the
     # credential is genuinely the org's own (tier 1/2), but the upstream bill is ours, so the call

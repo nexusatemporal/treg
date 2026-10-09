@@ -7,6 +7,7 @@ sources:
   - src/treg/bootstrap_http.py
   - src/treg/worker.py
   - src/treg/infra/money_trace_runner.py
+  - src/treg/infra/money_admission_reporting.py
   - src/treg/call_surface.py
   - src/treg/application/connect.py
   - src/treg/domain/identity/mcp_oauth.py
@@ -85,6 +86,13 @@ and before analytics drains. The worker command dispatcher uses the same lifecyc
 command, including asynchronous settlement; its final local summary has a bounded shutdown wait.
 The [data-model](data-model.md#product-analytics-writer-analyticspy) fragment defines the trace's
 coverage, privacy and loss counters.
+
+The existing web money-timing timer also emits `money_admission_gauge` locally and to analytics;
+it adds no background sampler or per-request transport. `worker._run_command` emits the final
+admission window even when its command fails, attempts at most one second of analytics draining
+when a window exists, and closes the shared KV client before leaving the trace lifecycle.
+Short-worker delivery remains best effort, so use its local exit summary to distinguish missing
+network delivery from absent work. The final trace summary is emitted separately by its lifecycle.
 
 `bootstrap_handlers.py` owns the app-wide pool-saturation and HTTP-exception adapters.
 `call_surface.split_call_path`
