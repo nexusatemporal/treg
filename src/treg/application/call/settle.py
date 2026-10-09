@@ -26,6 +26,7 @@ from ...domain.asynctasks import json_path
 from ...domain.money import settlement as settlement_basis
 from ...domain.catalog import store as catalog_store
 from ...infra.db import session_maker
+from ...infra.money_timing import observe_money
 from ...models import Org
 from ...timeutil import utcnow_naive as _utcnow_naive
 from .idempotency import _release_idempotent_claim
@@ -1203,32 +1204,35 @@ async def _platform_settle(
         return would, observed
 
     async def _close() -> int:
-        async with session_maker() as db:
-            if billable:
-                charged = await ledger.settle_in_transaction(db, call_id, actual, meta={
-                    "provider": mk.provider, "status_code": status_code, "cost_type": mk.cost_type,
-                    "cost_source": ("aggregator" if overflow_spend is not None else
-                                    "provider" if observed is not None else
-                                    mk.settlement_basis.get("amount", {}).get("kind", "estimate")),
-                    **({"served_via": f"overflow:{overflow_spend[0]}"} if overflow_spend else {}),
-                    **({"cached": True,
-                        "cache_price_percent": repeat_percent if cached_repeat else 100}
-                       if cached_hit else {})})
-                if archive_use is not None:
-                    await archive.note_org_use_in_transaction(db, archive_use[0], archive_use[1])
-            else:
-                await ledger.release_in_transaction(
-                    db, call_id, reason=reason or f"not_billable_{status_code}",
-                    meta={"provider": mk.provider, "cost_type": mk.cost_type,
-                          "status_code": status_code})
-                charged = 0
-            if overflow_spend is not None:
-                await overflow_spend_ledger.add_in_transaction(
-                    db, overflow_spend[0], overflow_spend[1], overflow_spend[2])
-            await db.commit()
-            if finalized is not None:
-                finalized()
-            return charged
+        with observe_money("close", call_id=call_id) as timing:
+            async with session_maker() as db:
+                with timing.phase("ledger"):
+                    if billable:
+                        charged = await ledger.settle_in_transaction(db, call_id, actual, meta={
+                            "provider": mk.provider, "status_code": status_code, "cost_type": mk.cost_type,
+                            "cost_source": ("aggregator" if overflow_spend is not None else
+                                            "provider" if observed is not None else
+                                            mk.settlement_basis.get("amount", {}).get("kind", "estimate")),
+                            **({"served_via": f"overflow:{overflow_spend[0]}"} if overflow_spend else {}),
+                            **({"cached": True,
+                                "cache_price_percent": repeat_percent if cached_repeat else 100}
+                               if cached_hit else {})})
+                        if archive_use is not None:
+                            await archive.note_org_use_in_transaction(db, archive_use[0], archive_use[1])
+                    else:
+                        await ledger.release_in_transaction(
+                            db, call_id, reason=reason or f"not_billable_{status_code}",
+                            meta={"provider": mk.provider, "cost_type": mk.cost_type,
+                                  "status_code": status_code})
+                        charged = 0
+                    if overflow_spend is not None:
+                        await overflow_spend_ledger.add_in_transaction(
+                            db, overflow_spend[0], overflow_spend[1], overflow_spend[2])
+                with timing.phase("commit"):
+                    await db.commit()
+                if finalized is not None:
+                    finalized()
+                return charged
 
     try:
         try:
@@ -1272,17 +1276,25 @@ async def close_deferred(items: list[DeferredSettle], *, charge: bool, why: str 
     pending, items[:] = list(items), []
     total = 0
     try:
-        async with session_maker() as db:
-            for d in pending:
-                if charge and d.billable:
-                    total += await ledger.settle_in_transaction(db, d.call_id, d.actual_micro, meta=d.meta)
-                    if d.archive_use is not None:
-                        await archive.note_org_use_in_transaction(db, d.archive_use[0], d.archive_use[1])
-                else:
-                    await ledger.release_in_transaction(
-                        db, d.call_id, reason=d.reason if charge else (why or "routed_call_failed"),
-                        meta=d.meta)
-            await db.commit()
+        with observe_money("deferred", batch_size=len(pending)) as timing:
+            async with session_maker() as db:
+                with timing.phase("ledger"):
+                    amounts = await ledger.close_holds_in_transaction(db, [
+                        ledger.HoldClose(
+                            d.call_id, charge and d.billable, d.actual_micro,
+                            d.reason if charge else (why or "routed_call_failed"), d.meta)
+                        for d in pending
+                    ])
+                    total = sum(amount for d, amount in zip(pending, amounts) if charge and d.billable)
+                    # Archive marks also take row/unique-key locks. Acquire them after ALL money writes,
+                    # in a stable order, even for zero-cost batches with no balance/block locks. Keep
+                    # repeated marks: each child still increments its question's usage counter.
+                    uses = sorted(d.archive_use for d in pending
+                                  if charge and d.billable and d.archive_use is not None)
+                    for org_id, key_hash in uses:
+                        await archive.note_org_use_in_transaction(db, org_id, key_hash)
+                with timing.phase("commit"):
+                    await db.commit()
     except Exception as exc:  # noqa: BLE001 — loudly, but never into the caller's response
         logging.getLogger("treg.ledger").error(
             "closing %d deferred routed holds (charge=%s) failed: %s", len(pending), charge, exc,
@@ -1319,14 +1331,13 @@ async def _finish_cancelled_call(
                     # The parent hold AND the overflow child's (`{call_ref}:overflow`, plan §4.3
                     # step 2): each release is a conditional claim, so a hold that never existed or
                     # was already closed is a safe no-op, and both are released exactly once.
-                    for hold_id in (call_ref, f"{call_ref}:overflow"):
-                        await ledger.release_in_transaction(
-                            cleanup_db,
-                            hold_id,
-                            reason="call_cancelled",
+                    await ledger.close_holds_in_transaction(cleanup_db, [
+                        ledger.HoldClose(
+                            hold_id, False, reason="call_cancelled",
                             meta={"provider": mk.provider, "cost_type": mk.cost_type,
-                                  "status_code": None},
-                        )
+                                  "status_code": None})
+                        for hold_id in (call_ref, f"{call_ref}:overflow")
+                    ])
                     await cleanup_db.commit()
             except (Exception, asyncio.CancelledError):  # noqa: BLE001
                 logging.getLogger("treg.ledger").error(
