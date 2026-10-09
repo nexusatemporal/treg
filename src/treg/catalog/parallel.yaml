@@ -32,7 +32,7 @@ endpoints:
     cost:
       type: per_call
       value: 0.001
-      fallback: {value: 0.011, note: "The search plus ten results past the included ten, the 20-result cap."}
+      fallback: {value: 0.001, note: "The search with its ten included results; usage settles any result past ten."}
       currency: USD
       unit: call
       settle: usage
@@ -45,7 +45,7 @@ endpoints:
       source_url: https://docs.parallel.ai/getting-started/pricing
       checked: '2026-10-09'
       confidence: verified
-      note: "$0.001 per turbo or fast search with ten results included; each result past ten adds $0.001. Live: a two-result turbo search reported usage sku_search 1; a 15-result turbo search reported sku_search 1 and sku_extract_excerpts 5. The hold covers 20 results and usage settles."
+      note: "$0.001 per turbo or fast search with ten results included; each result past ten adds $0.001. Live: a two-result turbo search reported usage sku_search 1; a 15-result turbo search reported sku_search 1 and sku_extract_excerpts 5. The hold is the base price and usage settles the rest."
     verified: '2026-10-09'
     added: '2026-10-09'
     example_response: examples/parallel.web.search.json
@@ -76,7 +76,7 @@ endpoints:
     cost:
       type: per_call
       value: 0.005
-      fallback: {value: 0.015, note: "The search plus ten results past the included ten, the 20-result cap."}
+      fallback: {value: 0.005, note: "The search with its ten included results; usage settles any result past ten."}
       currency: USD
       unit: call
       settle: usage
@@ -89,7 +89,7 @@ endpoints:
       source_url: https://docs.parallel.ai/getting-started/pricing
       checked: '2026-10-09'
       confidence: documented
-      note: "$0.005 per basic or advanced search with ten results included; each result past ten adds $0.001. Live: a two-result basic search reported usage sku_search 1, the same SKU name as turbo, so the mode price comes from this row and not from the response. The hold covers 20 results and usage settles."
+      note: "$0.005 per basic or advanced search with ten results included; each result past ten adds $0.001. Live: a two-result basic search reported usage sku_search 1, the same SKU name as turbo, so the mode price comes from this row and not from the response. The hold is the base price and usage settles the rest."
     verified: '2026-10-09'
     added: '2026-10-09'
     example_response: examples/parallel.web.search.advanced.json
@@ -120,7 +120,7 @@ endpoints:
     cost:
       type: per_success
       value: 0.001
-      fallback: {value: 0.02, note: "Twenty URLs, the request maximum."}
+      fallback: {value: 0.001, note: "One URL; usage settles each further URL."}
       currency: USD
       unit: page
       settle: usage
@@ -132,7 +132,7 @@ endpoints:
       source_url: https://docs.parallel.ai/getting-started/pricing
       checked: '2026-10-09'
       confidence: verified
-      note: "$0.001 per extracted URL; full content costs the same. Live: two readable URLs with full content reported usage sku_extract_excerpts 2; one unreachable URL returned errors[] and an empty usage list. The hold covers 20 URLs and usage settles."
+      note: "$0.001 per extracted URL; full content costs the same. Live: two readable URLs with full content reported usage sku_extract_excerpts 2; one unreachable URL returned errors[] and an empty usage list. The hold is one URL and usage settles the rest."
     verified: '2026-10-09'
     added: '2026-10-09'
     example_response: examples/parallel.web.extract.json

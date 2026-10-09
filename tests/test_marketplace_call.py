@@ -3217,20 +3217,22 @@ async def test_a_sync_usage_settled_call_charges_the_providers_reported_cost(
     assert before - await _balance(clients) == 20
 
 
-@pytest.mark.parametrize(("endpoint", "body", "usage", "charged"), [
+@pytest.mark.parametrize(("endpoint", "body", "usage", "base", "charged"), [
     # Live 2026-10-09: 15 turbo results reported the search plus five results past ten.
     ("parallel.web.search", {"search_queries": ["x"], "mode": "fast",
                              "advanced_settings": {"max_results": 15}},
-     [{"name": "sku_search", "count": 1}, {"name": "sku_extract_excerpts", "count": 5}], 6_000),
+     [{"name": "sku_search", "count": 1}, {"name": "sku_extract_excerpts", "count": 5}], "0.001", 6_000),
     # basic and advanced report the same `sku_search` name; the row prices the mode.
     ("parallel.web.search.advanced", {"search_queries": ["x"]},
-     [{"name": "sku_search", "count": 1}], 5_000),
+     [{"name": "sku_search", "count": 1}], "0.005", 5_000),
     ("parallel.web.extract", {"urls": ["https://example.com", "https://example.org"]},
-     [{"name": "sku_extract_excerpts", "count": 2}], 2_000),
+     [{"name": "sku_extract_excerpts", "count": 2}], "0.001", 2_000),
 ])
 async def test_parallel_platform_call_settles_its_reported_usage_skus(
-    clients, monkeypatch, endpoint, body, usage, charged,
+    clients, monkeypatch, endpoint, body, usage, base, charged,
 ):
+    """The hold is the base price, so a caller capped at it (Web Arena caps each leg at the
+    catalog price) is served; the reported usage then settles any extra results or URLs."""
     monkeypatch.setenv("TREG_PLATFORM_KEY_PARALLEL", "PLATFORM-PARALLEL")
     monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "parallel")
     get_settings.cache_clear()
@@ -3246,7 +3248,8 @@ async def test_parallel_platform_call_settles_its_reported_usage_skus(
         async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as upstream:
             monkeypatch.setattr(A.app.state, "http", upstream)
             before = await _balance(clients)
-            r = await clients.post(f"/call/{endpoint}", json=body)
+            r = await clients.post(f"/call/{endpoint}", json=body,
+                                   headers={"X-Treg-Route-Max-Cost": base})
             assert r.status_code == 200, r.text
             assert r.json() == reply
             assert r.headers["x-treg-cost-micro"] == str(charged)
