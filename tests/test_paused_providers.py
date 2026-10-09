@@ -123,6 +123,11 @@ async def test_a_paused_provider_is_hidden_refused_and_its_connections_kept(
     calls = (await clients.get("/calls")).json()
     assert len(calls) == 3 and {c["refused_by"] for c in calls} == {"paused"}
 
+    # The dashboard learns what is paused, and what to say, from /meta.
+    meta = (await clients.get("/meta")).json()["paused_providers"]
+    assert meta == {GBP: {"display_name": "Google Business Profile",
+                          "message": get_settings().paused_provider_message(GBP, "Google Business Profile")}}
+
     # Connect: gone from the listing, refused when started anyway.
     assert GBP not in {p["service"] for p in (await clients.get("/oauth/providers")).json()}
     r = await clients.post("/oauth/start", json={"provider": GBP})
@@ -147,6 +152,7 @@ async def test_a_paused_provider_is_hidden_refused_and_its_connections_kept(
 async def test_lifting_the_pause_restores_everything_with_no_reconnect(clients: AsyncClient, monkeypatch):
     sid = await _connect_gbp(clients)
     assert get_settings().paused_providers_set == frozenset()
+    assert (await clients.get("/meta")).json()["paused_providers"] == {}
     r = await clients.get("/catalog/search", params={"q": "google business profile reviews", "limit": 100})
     assert f"{GBP}." in r.text
     assert (await clients.get(f"/catalog/endpoints/{EP}")).status_code == 200

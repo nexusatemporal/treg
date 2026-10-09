@@ -3973,6 +3973,14 @@ def paused_message(service: str) -> str:
         service, provider.display_name if provider else service)
 
 
+def paused_listing() -> dict[str, dict]:
+    """Every paused provider with its name and message, for the dashboard (`/meta`): `listing()`
+    leaves them out, and a page reached by a link or a catalog row still has to say why."""
+    return {service: {"display_name": getattr(REGISTRY.get(service), "display_name", service),
+                      "message": paused_message(service)}
+            for service in sorted(get_settings().paused_providers_set)}
+
+
 def paused_detail(service: str, endpoint_id: str | None = None) -> dict:
     """The typed body every paused refusal carries: calls, connects and catalog_get alike."""
     return {"error": "provider_paused", "provider": service,
