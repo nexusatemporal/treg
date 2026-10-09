@@ -42,7 +42,8 @@ read-side Ads catalog calls (`oauth_providers.GOOGLE_ADS`), a separate credentia
    `denied` before the tag script is appended, so Google sets and reads no advertising cookie and
    receives only cookieless pings, which is what lets it MODEL conversions for visitors who never
    granted anything (a tag that is not loaded sends nothing and models nothing). The dashboard
-   includes it with `data-conversion-only` (`send_page_view: false`) and fires exactly one event,
+   includes it with `data-conversion-only` (`send_page_view: false`; Google's own cookieless
+   `ccm/collect` consent ping still goes out on every load regardless) and fires exactly one event,
    `treg Signup (web)` (`AW-18392771132/0usqCIeQrO0cELzUrcJE`, action `7745505287`, SECONDARY
    and excluded from the Conversions column, so it never double counts against the outbox below),
    right after the first team exists: from `welcomeCreate()` (`frontend/src/state/onboarding.js`)
