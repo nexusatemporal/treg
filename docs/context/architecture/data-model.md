@@ -54,6 +54,8 @@ sources:
   - src/treg/timeutil.py
   - src/treg/infra/db.py
   - src/treg/infra/money_timing.py
+  - src/treg/infra/money_admission.py
+  - src/treg/infra/money_admission_reporting.py
   - src/treg/infra/money_trace.py
   - src/treg/infra/money_trace_runner.py
   - src/treg/domain/referrals.py
@@ -68,6 +70,7 @@ sources:
   - tests/test_redundant_index_migration.py
   - tests/test_api_keys.py
   - tests/test_money_timing.py
+  - tests/test_money_admission_reporting.py
   - tests/test_money_trace.py
   - tests/test_money_trace_postgres.py
   - tests/test_money_trace_runner.py
@@ -584,7 +587,8 @@ hygiene (`pool_pre_ping`/`pool_recycle`/sizing) for non-SQLite URLs, and `verify
 no `TREG_SECRET_KEY` on a real DB (an ephemeral key would lose every stored secret on restart).
 
 `infra.money_timing.observe_money` measures the ordinary call's `reserve`, `close` and `deferred`
-session scopes with local monotonic timers. These cover pool acquisition and session cleanup,
+application scopes with local monotonic timers. These cover optional settlement admission,
+pool acquisition and session cleanup,
 including rollback on failure; reserve also includes its post-commit balance reload. They are not
 pure row-lock durations or a census of all money writers: Hub, billing, direct ledger callers and
 the asynchronous-task worker are outside this observation boundary. Fixed `preflight`, `ledger`,
@@ -603,6 +607,34 @@ retained aggregates have per-team cardinality. At most the slowest completed sco
 per operation/window produces a WARNING log with its numeric org ID when available, validated opaque
 call ID, batch size, outcome and phase durations; no amount, body or exception message is logged.
 These observations remain best effort through the existing bounded analytics queue.
+
+`infra.money_admission.snapshot` adds bounded `money_admission_gauge` summaries by operation
+(`close`, `deferred`, `async`, `hub`) and mode (`disabled`, `redis`, `fallback`). Eligible calls
+record the same timing boundary when admission is disabled; pure releases bypass this observation.
+`money_admission_reporting.emit_snapshot` writes one local JSON record and queues one PostHog event
+per populated operation/mode, through the existing web minute timer and final partial window.
+Workers emit their accumulated window on command exit and attempt a bounded analytics drain;
+the local exit summary is the fallback evidence if delivery fails. There are no per-call network
+events or org/call IDs in these aggregates.
+
+`wait_total_ms` / `wait_max_ms` cover admission before the session, including failed-acquisition
+cleanup. `execution_total_ms` / `execution_max_ms` cover the admitted application session scope,
+including pool checkout and rollback/close; they are not measured connection-held time.
+`total_total_ms` / `total_max_ms` include both plus lease cleanup. `completed` counts completed
+scopes, including the `failed` and `cancelled` subsets. Use sums of elapsed totals divided by the
+sum of completed scopes for weighted means. Wait buckets are disjoint upper-bound intervals;
+neither buckets nor minute maxima are per-call p95. `waiting`, `active` and their peaks describe
+this process's scopes, not global simultaneous concurrency or database connections. Whole
+durations and fallback counters belong to completion windows; an unfinished operation can span
+several windows.
+
+`fallback_*`, `lease_lost` and `kv_errors` expose degraded isolation, separately from business
+failures. Join `process_instance`, `build` and `role` to pool and money-operation summaries when
+comparing a rollout. Disabled and enabled org cohorts can have different workloads; a latency
+difference alone is not a causal comparison. Existing `money_operation_gauge` can compare builds
+that predate admission telemetry, but covers a different population and boundary from the
+admission gauge. PostHog remains a lossy diagnostic sink, never the ledger or evidence that an
+individual charge committed.
 
 `infra.money_trace` separately follows the actual database transactions behind the public money
 entries, including grants, top-ups, Hub transfers, batch closes and stale-hold releases. Application

@@ -1,26 +1,42 @@
-"""The shared key-value store: small, expiring counters that several workers must agree on.
+"""The shared key-value store: expiring counters and optional admission leases.
 
 Render Key Value (Redis protocol) in production, an in-process dictionary when `TREG_KV_URL` is
 unset (local development, tests, self-hosters without one). The store holds nothing that must
 survive: every key expires, and every caller treats "unavailable" as a safe answer. Reads and
 writes are bounded by `_TIMEOUT_S` so a slow store can never hold a call open.
 
-The first tenant is the review-invitation budget (`application/call/invite.py`). Nothing else may
-depend on this module until it has proved itself there; the pattern for a new tenant is one more
-narrow method here, not a generic get/set surface.
+Review-invitation budgets fail closed; money admission leases report unavailability explicitly
+so the caller can retain PostgreSQL's original correctness path. New tenants add narrow methods,
+not a generic get/set surface. Local counters do not pretend to provide distributed leases.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from typing import Protocol
+from typing import Literal, Protocol
 
 from ..config import get_settings
 
 _TIMEOUT_S = 0.1
 _LOCAL_MAX_KEYS = 10_000
 log = logging.getLogger("treg.kv")
+
+AcquireResult = Literal["acquired", "busy", "unavailable"]
+RenewResult = Literal["renewed", "lost", "unavailable"]
+ReleaseResult = Literal["released", "lost", "unavailable"]
+_RENEW_LEASE = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('pexpire', KEYS[1], ARGV[2])
+end
+return 0
+"""
+_RELEASE_LEASE = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
 
 
 class Store(Protocol):
@@ -30,6 +46,12 @@ class Store(Protocol):
         answer: a budget that cannot be checked is spent, never free."""
 
     async def ping(self) -> bool: ...
+
+    async def acquire_lease(self, key: str, token: str, ttl_ms: int) -> AcquireResult: ...
+
+    async def renew_lease(self, key: str, token: str, ttl_ms: int) -> RenewResult: ...
+
+    async def release_lease(self, key: str, token: str) -> ReleaseResult: ...
 
     async def aclose(self) -> None: ...
 
@@ -59,6 +81,15 @@ class LocalStore:
 
     async def ping(self) -> bool:
         return True
+
+    async def acquire_lease(self, key: str, token: str, ttl_ms: int) -> AcquireResult:
+        return "unavailable"  # Local counters cannot promise cross-process exclusion.
+
+    async def renew_lease(self, key: str, token: str, ttl_ms: int) -> RenewResult:
+        return "unavailable"
+
+    async def release_lease(self, key: str, token: str) -> ReleaseResult:
+        return "unavailable"
 
     async def aclose(self) -> None:
         self._windows.clear()
@@ -92,6 +123,35 @@ class RedisStore:
         except Exception as exc:  # noqa: BLE001
             _note_fault(exc)
             return False
+
+    async def acquire_lease(self, key: str, token: str, ttl_ms: int) -> AcquireResult:
+        """A short-lived admission lease, never the authority for a money write.
+
+        Unavailable is deliberately distinct from contention. Lease callers aggregate faults;
+        unlike optional invitation budgets, an outage must not discard a pending settlement.
+        """
+        try:
+            async with asyncio.timeout(_TIMEOUT_S * 2):
+                acquired = await self._client.set(key, token, nx=True, px=ttl_ms)
+            return "acquired" if acquired else "busy"
+        except Exception:  # noqa: BLE001 - cancellation still propagates to the owning scope
+            return "unavailable"
+
+    async def renew_lease(self, key: str, token: str, ttl_ms: int) -> RenewResult:
+        try:
+            async with asyncio.timeout(_TIMEOUT_S * 2):
+                renewed = await self._client.eval(_RENEW_LEASE, 1, key, token, ttl_ms)
+            return "renewed" if renewed else "lost"
+        except Exception:  # noqa: BLE001
+            return "unavailable"
+
+    async def release_lease(self, key: str, token: str) -> ReleaseResult:
+        try:
+            async with asyncio.timeout(_TIMEOUT_S * 2):
+                released = await self._client.eval(_RELEASE_LEASE, 1, key, token)
+            return "released" if released else "lost"
+        except Exception:  # noqa: BLE001
+            return "unavailable"
 
     async def aclose(self) -> None:
         try:

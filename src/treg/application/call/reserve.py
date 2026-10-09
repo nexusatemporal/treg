@@ -223,6 +223,8 @@ async def _platform_reserve(mk: MarketplaceCall, caller: Caller, meta: CallMeta 
     endpoint match. The already-parsed object travels, never a bare dict — re-deriving the primary
     dimension here would be a second place that could disagree about who pays."""
     charged = ledger.with_margin(mk.estimate_micro)
+    mk.payer_org_id = caller.org_id
+    mk.reserved_micro = max(0, charged)
     if mk.max_cost_micro is not None and charged > mk.max_cost_micro:
         raise ReservationFailed("route_max_cost", status_code=402, detail={
             "error": "route_max_cost", "endpoint_id": mk.endpoint_id, "provider": mk.provider,

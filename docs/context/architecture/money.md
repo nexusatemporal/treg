@@ -27,6 +27,9 @@ sources:
   - src/treg/application/referrals.py
   - src/treg/domain/governance/budgets.py
   - src/treg/infra/__init__.py
+  - src/treg/infra/money_admission.py
+  - src/treg/infra/money_session.py
+  - src/treg/application/hub/runner.py
   - src/treg/infra/stripe.py
   - src/treg/reconcile.py
   - src/treg/domain/referrals.py
@@ -41,6 +44,10 @@ sources:
   - src/treg/routers/referrals.py
   - tests/test_call_architecture.py
   - tests/test_money_lock_order.py
+  - tests/test_money_admission.py
+  - tests/test_money_admission_application.py
+  - tests/test_money_admission_postgres.py
+  - scripts/bench_money_admission.py
   - tests/test_marketplace_call.py
   - tests/test_asynctasks.py
 related:
@@ -259,6 +266,47 @@ the actual commit/rollback boundary, rather than the public function return, end
 See [transaction diagnostics](data-model.md#product-analytics-writer-analyticspy) for coverage,
 bounded logging, worker lifecycle and evidence limitations. Tracing changes neither lock order
 nor accounting behavior.
+
+### Optional admission before the settlement session
+
+`infra.money_admission.admit` optionally queues CreditBlock consumers by payer Org before their
+application opens a database session. A process-local async lock limits Redis polling within that
+process; contended Redis acquisition retries after a random 3–10 ms async delay. A token-owned,
+expiring Redis lease coordinates participating processes. Multi-org batches
+acquire eligible Org leases in sorted ID order. The scope surrounds session acquisition, ledger
+work, commit or rollback, and session cleanup; it releases leases only after that scope exits.
+`infra.money_session.money_session` joins the session's close/rollback task even under repeated
+cancellation before allowing the admission scope to exit, then propagates cancellation or the
+original failure. It does not introduce a commit or change the application's commit boundaries.
+Waiting for admission holds no database connection.
+
+The application supplies the already-known payer identity through `MarketplaceCall` and
+`DeferredSettle`, an asynchronous task snapshot, or the Hub caller. The gate covers ordinary
+positive settlements, charged deferred batches, potentially billable asynchronous terminal
+settlement, and the Hub payer's positive seller payment. Async admission is conservative: the
+locked task row still decides whether and how much to charge. Reserve, pure release, grants and
+top-ups do not acquire this gate, and a Hub payee is not an additional admission key. Direct
+ledger callers retain their existing database behavior.
+
+The feature defaults off; `money_admission_org_ids` selects an opt-in subset, or all orgs when
+empty and enabled. Non-selected operations supply the disabled timing baseline. Admission never
+replaces Hold claims, CreditBlock locks or transaction atomicity. A missing identity, unavailable
+Redis, or expired acquisition budget releases any partially acquired gates and executes the
+original database path. Lost renewal does not cancel or restart a money transaction already in
+progress. These paths preserve database correctness but give up admission isolation; they are
+counted separately. Owner-checked renewal and deletion prevent an old lease holder from extending
+or deleting a newer owner's lease. TTL and renewal cannot prove that an old database transaction
+has stopped, which is why database locks remain necessary.
+
+This is best-effort contention isolation, not a global money concurrency cap, durable queue or
+promise of FIFO across processes. Serializing the entire application session also serializes work
+such as Hold claims and session cleanup that previously could overlap; even without polling
+delay, hot-org throughput can regress. Moving waiters out of the database reduces their connection
+occupancy, not necessarily their total latency. Redis round trips add cost, and fallback traffic
+can still exhaust the original pool. It neither increases a hot org's serial settlement capacity
+nor bounds an existing transaction's lock duration. Default-off, per-org rollout and measured
+end-to-end performance are therefore part of adoption. See [deployment controls](../ops/deploy.md#optional-money-admission)
+and [aggregate telemetry](data-model.md#product-analytics-writer-analyticspy) for rollout and measurement.
 
 **Margin is applied inside the module** (`with_margin`), at reserve AND settle, and the rate in force
 is recorded on every entry - so a rate change cannot retroactively rewrite what a call cost, and two

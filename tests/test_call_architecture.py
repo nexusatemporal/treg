@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 from treg import archive, archive_bodies, bootstrap
-from treg.application import billing
+from treg.application import billing, asynctasks as task_app
+from treg.application.hub import runner as hub_runner
 from treg.application.call import authorize, overflow, reserve, service, settle
 from treg.domain import money
 from treg.domain.capacity import marks as capacity_marks
@@ -20,6 +21,13 @@ from treg.domain.governance import usage as usage_policy
 _SRC = Path(__file__).parents[1] / "src" / "treg"
 
 _DATAPLANE_DERIVED_WRITES = {
+    # A best-effort external admission lease precedes the existing money session.
+    "money_admission_lease": (
+        (settle._platform_settle, "money_admission.admit"),
+        (settle.close_deferred, "money_admission.admit"),
+        (task_app._finish_terminal, "money_admission.admit"),
+        (hub_runner._close_price, "money_admission.admit"),
+    ),
     # Body objects preserve the paid response. Upload completes before the archive DB transaction
     # starts, and only its verified content hash can be published on the snapshot.
     "archive_body_object": (
@@ -96,6 +104,7 @@ _DATAPLANE_DERIVED_WRITES = {
     ),
 }
 _EXPECTED_DATAPLANE_WRITES = frozenset({
+    "money_admission_lease",
     "archive_body_object",
     "auto_topup_task",
     "public_demo_ratestore_hit",
@@ -112,6 +121,8 @@ _EXPECTED_DATAPLANE_WRITES = frozenset({
     "member_daily_cap_slot",
 })
 _DERIVED_WRITE_FILES = {
+    _SRC / "application" / "asynctasks.py": {"money_admission.admit"},
+    _SRC / "application" / "hub" / "runner.py": {"money_admission.admit"},
     _SRC / "archive.py": {"archive_bodies.prepare"},
     _SRC / "archive_bodies.py": {"_store.put"},
     _SRC / "application" / "billing.py": {"loop.create_task"},
@@ -121,7 +132,7 @@ _DERIVED_WRITE_FILES = {
     _SRC / "domain" / "governance" / "usage.py": {"take_daily_slot"},
     _SRC / "application" / "call" / "reserve.py": {"billing.maybe_schedule_autotopup"},
     _SRC / "application" / "call" / "settle.py": {
-        "adsconv.queue", "capacity_marks.strike", "capacity_marks.clear",
+        "money_admission.admit", "adsconv.queue", "capacity_marks.strike", "capacity_marks.clear",
         "capacity_marks.clear_sweep_state",
         "overflow_spend_ledger.add_in_transaction", "archive.note_org_use_in_transaction",
     },
@@ -145,6 +156,11 @@ _DERIVED_WRITE_FILES = {
     _SRC / "domain" / "money" / "__init__.py": {"reap_stale_holds", "release"},
 }
 _EXPECTED_DERIVED_WRITE_SITES = {
+    ("application/call/settle.py", "_platform_settle", "money_admission.admit"),
+    ("application/call/settle.py", "_close", "money_admission.admit"),
+    ("application/call/settle.py", "close_deferred", "money_admission.admit"),
+    ("application/asynctasks.py", "_finish_terminal", "money_admission.admit"),
+    ("application/hub/runner.py", "_close_price", "money_admission.admit"),
     ("application/call/service.py", "_execute_call", "archive.record"),
     ("archive.py", "_store", "archive_bodies.prepare"),
     ("archive_bodies.py", "prepare", "_store.put"),

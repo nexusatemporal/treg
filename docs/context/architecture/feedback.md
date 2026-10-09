@@ -184,8 +184,13 @@ atomic `INCR` + `EXPIRE NX`. Reads and writes are capped at 100 ms and **fail cl
 that cannot answer is a spent budget, so an outage silently withholds review invitations rather
 than flooding a team, and `hint_attached` events dropping to zero is the signal. `/admin/kv`
 (superadmin) reports `configured` and `reachable`; startup logs a warning when the configured
-store does not answer. The store is the invitation budget's tenant only; a new tenant is one
-more narrow method, not a generic get/set surface.
+store does not answer. Optional [money admission](money.md#optional-admission-before-the-settlement-session)
+is a separate tenant using `acquire_lease`, `renew_lease` and `release_lease`, with explicit
+contention, lost-ownership and unavailable results. Its owner-checked Redis lease operations are
+bounded at twice `_TIMEOUT_S`; the local counter store reports leases unavailable rather than
+claiming cross-process exclusion. Money admission falls back to database protection on store
+failure, whereas invitation budgets still fail closed. New tenants add narrow methods, not a
+generic get/set surface.
 
 Each surface's server `instructions` field also tells agents, in one sentence, to rate an
 invited call with `review(call_id, usefulness, reason?)` after using it and then continue, one

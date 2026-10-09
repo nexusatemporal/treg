@@ -76,6 +76,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
+      redis:
+        image: redis:7.4
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
       postgres:
         image: postgres:16
         env:
@@ -91,6 +100,7 @@ jobs:
           --health-retries 5
     env:
       TREG_TEST_DB_URL: postgresql+asyncpg://treg:treg@127.0.0.1:5432/treg_test
+      TREG_TEST_KV_URL: redis://127.0.0.1:6379/15
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
@@ -119,6 +129,11 @@ jobs:
           tests/test_ledger.py
           tests/test_ledger_claim_review.py
           tests/test_money_lock_order.py
+          tests/test_money_admission.py
+          tests/test_money_admission_application.py
+          tests/test_money_admission_postgres.py
+          tests/test_money_admission_reporting.py
+          tests/test_kv.py
           tests/test_money_trace.py
           tests/test_money_trace_postgres.py
           tests/test_money_trace_runner.py

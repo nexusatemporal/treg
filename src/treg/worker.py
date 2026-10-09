@@ -374,11 +374,26 @@ def _positive_int(value: str) -> int:
 
 
 async def _run_command(args) -> int:
+    from . import analytics
+    from .infra import kv
+    from .infra.money_admission_reporting import emit_snapshot
     from .infra.money_trace_runner import money_trace_lifespan
 
     # In particular, async hold settlement runs here without any web application's lifespan.
     async with money_trace_lifespan(role="worker"):
-        return await args.fn(args)
+        try:
+            return await args.fn(args)
+        finally:
+            try:
+                if emit_snapshot(role="worker", shutdown=True):
+                    # Best effort and bounded: the local exit summary remains available if the
+                    # analytics destination is slow or unavailable.
+                    async with asyncio.timeout(1):
+                        await analytics.drain()
+            except Exception:  # noqa: BLE001 - preserve the command's result/failure
+                pass
+            finally:
+                await kv.close()
 
 
 def main(argv: list[str] | None = None) -> int:

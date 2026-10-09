@@ -26,6 +26,8 @@ from ...domain.asynctasks import json_path
 from ...domain.money import settlement as settlement_basis
 from ...domain.catalog import store as catalog_store
 from ...infra.db import session_maker
+from ...infra import money_admission
+from ...infra.money_session import money_session
 from ...infra.money_timing import observe_money
 from ...infra.money_trace import mark_money, money_stage
 from ...models import Org
@@ -1192,6 +1194,7 @@ async def _platform_settle(
         # a crash in between leaves the hold to the reaper, which releases in the caller's favour.
         mk.deferred.append(DeferredSettle(
             call_id=call_id, billable=billable, actual_micro=actual, archive_use=archive_use,
+            payer_org_id=mk.payer_org_id, reserved_micro=mk.reserved_micro,
             reason=reason or f"not_billable_{status_code}",
             meta={"provider": mk.provider, "status_code": status_code, "cost_type": mk.cost_type,
                   "cost_source": ("provider" if observed is not None else
@@ -1204,9 +1207,13 @@ async def _platform_settle(
                  else ledger.with_margin(mk.estimate_micro)) if billable else 0
         return would, observed
 
+    consumes_blocks = billable and (
+        actual > 0 if actual is not None else mk.reserved_micro is None or mk.reserved_micro > 0)
+    admission_orgs = [mk.payer_org_id] if consumes_blocks else []
+
     async def _close() -> int:
         with observe_money("close", call_id=call_id) as timing:
-            async with session_maker() as db:
+            async with money_admission.admit(admission_orgs, operation="close"), money_session(session_maker()) as db:
                 mark_money(db, "close", call_id=call_id)
                 with timing.phase("ledger"):
                     if billable:
@@ -1268,6 +1275,8 @@ class DeferredSettle:
     archive_use: tuple[int, str] | None
     reason: str
     meta: dict
+    payer_org_id: int | None = None
+    reserved_micro: int | None = None
 
 
 async def close_deferred(items: list[DeferredSettle], *, charge: bool, why: str = "") -> int:
@@ -1278,10 +1287,12 @@ async def close_deferred(items: list[DeferredSettle], *, charge: bool, why: str 
     if not items:
         return 0
     pending, items[:] = list(items), []
+    admission_orgs = [d.payer_org_id for d in pending if charge and d.billable and (
+        d.actual_micro > 0 if d.actual_micro is not None else d.reserved_micro is None or d.reserved_micro > 0)]
     total = 0
     try:
         with observe_money("deferred", batch_size=len(pending)) as timing:
-            async with session_maker() as db:
+            async with money_admission.admit(admission_orgs, operation="deferred"), money_session(session_maker()) as db:
                 mark_money(db, "deferred", batch_size=len(pending))
                 with timing.phase("ledger"):
                     amounts = await ledger.close_holds_in_transaction(db, [
