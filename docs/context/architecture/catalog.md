@@ -1707,7 +1707,9 @@ transaction under the cursor row's lock and re-reads every bucket it touches ins
 nothing about a bucket is carried between batches, so two overlapping runs (a slow backfill
 still going when the next schedule fires) serialize cleanly instead of one erasing the other's
 fold with the cursor already past the rows.
-Once caught up, an observation is the sum of that endpoint's day buckets from the day of the
+Once caught up, endpoints without mutable terminal evidence read the sum of their day buckets,
+including async endpoints without result adapters. Async endpoints with adapters retain live reads
+so late terminal hits are visible. The folded observation covers buckets from the day of the
 window's start onward (`stats.window_days`, at most one day more evidence than the live cut,
 never less), published through the same `stats.publish` floors the live path uses; the fold and
 the SQL are held equal by `tests/test_catalog_stats_refresh.py`. Merging days weights each
@@ -2135,8 +2137,12 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   counts until the word mappings are proven. Showing them means publishing them under the hit
   floor and, like `hit`, reading async endpoints live, since an async word can land after the
   fold cursor has passed its submission.
-  Async endpoints read their `CallRecord` observations live: the daily fold may consume a
-  submission before its terminal poll changes the hit, and its one-way cursor cannot revise it.
+  Async endpoints with result adapters read their `CallRecord` observations live: the daily fold
+  may consume a submission before its terminal poll changes the hit, and its one-way cursor cannot
+  revise it. Adapter presence selects that path even when verification is lost, preserving recorded
+  terminal evidence. Without an adapter, terminal classification never corrects `hit`, so the reader
+  uses the existing day buckets for all published observations. HTTP success and request latency
+  describe the submission, as on the live path; they do not claim to measure job completion.
   `stats.observed` publishes `hit_rate`/`hit_samples` (floor 20) and, for synchronous
   per-success endpoints, reads historical rows too (a 2xx with `cost_observed_micro == 0` is a miss).
   Async per-success endpoints use only the terminal verdict: a found result can cost zero credits.
