@@ -27,6 +27,7 @@ from ...domain.money import settlement as settlement_basis
 from ...domain.catalog import store as catalog_store
 from ...infra.db import session_maker
 from ...infra.money_timing import observe_money
+from ...infra.money_trace import mark_money, money_stage
 from ...models import Org
 from ...timeutil import utcnow_naive as _utcnow_naive
 from .idempotency import _release_idempotent_claim
@@ -1206,6 +1207,7 @@ async def _platform_settle(
     async def _close() -> int:
         with observe_money("close", call_id=call_id) as timing:
             async with session_maker() as db:
+                mark_money(db, "close", call_id=call_id)
                 with timing.phase("ledger"):
                     if billable:
                         charged = await ledger.settle_in_transaction(db, call_id, actual, meta={
@@ -1218,7 +1220,8 @@ async def _platform_settle(
                                 "cache_price_percent": repeat_percent if cached_repeat else 100}
                                if cached_hit else {})})
                         if archive_use is not None:
-                            await archive.note_org_use_in_transaction(db, archive_use[0], archive_use[1])
+                            with money_stage(db, "archive_use"):
+                                await archive.note_org_use_in_transaction(db, archive_use[0], archive_use[1])
                     else:
                         await ledger.release_in_transaction(
                             db, call_id, reason=reason or f"not_billable_{status_code}",
@@ -1226,8 +1229,9 @@ async def _platform_settle(
                                   "status_code": status_code})
                         charged = 0
                     if overflow_spend is not None:
-                        await overflow_spend_ledger.add_in_transaction(
-                            db, overflow_spend[0], overflow_spend[1], overflow_spend[2])
+                        with money_stage(db, "overflow_spend"):
+                            await overflow_spend_ledger.add_in_transaction(
+                                db, overflow_spend[0], overflow_spend[1], overflow_spend[2])
                 with timing.phase("commit"):
                     await db.commit()
                 if finalized is not None:
@@ -1278,6 +1282,7 @@ async def close_deferred(items: list[DeferredSettle], *, charge: bool, why: str 
     try:
         with observe_money("deferred", batch_size=len(pending)) as timing:
             async with session_maker() as db:
+                mark_money(db, "deferred", batch_size=len(pending))
                 with timing.phase("ledger"):
                     amounts = await ledger.close_holds_in_transaction(db, [
                         ledger.HoldClose(
@@ -1292,7 +1297,8 @@ async def close_deferred(items: list[DeferredSettle], *, charge: bool, why: str 
                     uses = sorted(d.archive_use for d in pending
                                   if charge and d.billable and d.archive_use is not None)
                     for org_id, key_hash in uses:
-                        await archive.note_org_use_in_transaction(db, org_id, key_hash)
+                        with money_stage(db, "archive_use"):
+                            await archive.note_org_use_in_transaction(db, org_id, key_hash)
                 with timing.phase("commit"):
                     await db.commit()
     except Exception as exc:  # noqa: BLE001 — loudly, but never into the caller's response

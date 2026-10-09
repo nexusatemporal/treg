@@ -17,6 +17,7 @@ from ...domain.governance.usage import _day_start_utc
 from ...domain.identity.access import Caller
 from ...infra.db import session_maker
 from ...infra.money_timing import observe_money
+from ...infra.money_trace import mark_money, money_stage
 from ...models import CallRecord, Org, TagBudget
 from .intake import CallMeta, _NO_META
 from .resolve import MarketplaceCall
@@ -237,9 +238,10 @@ async def _platform_reserve(mk: MarketplaceCall, caller: Caller, meta: CallMeta 
     try:
         with observe_money("reserve", org_id=caller.org_id, call_id=call_ref) as timing:
             async with session_maker() as db:
+                mark_money(db, "reserve", org_id=caller.org_id, call_id=call_ref)
                 # The builder's own per-tag ceilings first: a refusal that belongs to ONE of their users
                 # must not surface as the team-wide balance error, which names the builder's private numbers.
-                with timing.phase("preflight"):
+                with timing.phase("preflight"), money_stage(db, "preflight"):
                     await _enforce_tag_budgets(caller, meta, db, add_micro=mk.estimate_micro)
                     await _enforce_platform_daily_cap(caller, mk.estimate_micro, db)
                     await _enforce_trial_allowance(caller, mk.provider, mk.endpoint_id, db)
@@ -257,15 +259,18 @@ async def _platform_reserve(mk: MarketplaceCall, caller: Caller, meta: CallMeta 
                     # every call meanwhile. One read by primary key, refusals only;
                     # the wait check in `maybe_schedule_autotopup` keeps it from starting a task per call.
                     if auto_on:
-                        org = await db.get(Org, caller.org_id)
-                        if org is not None:
-                            billing.maybe_schedule_autotopup(org)
+                        mark_money(db, "reserve_refusal_read", org_id=caller.org_id, call_id=call_ref)
+                        with money_stage(db, "post_refusal_read"):
+                            org = await db.get(Org, caller.org_id)
+                            if org is not None:
+                                billing.maybe_schedule_autotopup(org)
                     raise
                 with timing.phase("commit"):
                     await db.commit()
                 # The conditional UPDATE bypasses an ORM instance. Reload after commit so auto-top-up sees
                 # the balance crossing that triggered this reservation.
-                with timing.phase("post_commit"):
+                mark_money(db, "reserve_post_commit", org_id=caller.org_id, call_id=call_ref)
+                with timing.phase("post_commit"), money_stage(db, "post_commit_read"):
                     org = await db.get(Org, caller.org_id)
                     if org is not None:
                         billing.maybe_schedule_autotopup(org)

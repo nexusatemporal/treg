@@ -54,6 +54,8 @@ sources:
   - src/treg/timeutil.py
   - src/treg/infra/db.py
   - src/treg/infra/money_timing.py
+  - src/treg/infra/money_trace.py
+  - src/treg/infra/money_trace_runner.py
   - src/treg/domain/referrals.py
   - src/treg/audit.py
   - src/treg/application/evidence_retention.py
@@ -66,6 +68,9 @@ sources:
   - tests/test_redundant_index_migration.py
   - tests/test_api_keys.py
   - tests/test_money_timing.py
+  - tests/test_money_trace.py
+  - tests/test_money_trace_postgres.py
+  - tests/test_money_trace_runner.py
 related:
   - architecture/archive.md
   - architecture/proxy-model.md
@@ -598,6 +603,50 @@ retained aggregates have per-team cardinality. At most the slowest completed sco
 per operation/window produces a WARNING log with its numeric org ID when available, validated opaque
 call ID, batch size, outcome and phase durations; no amount, body or exception message is logged.
 These observations remain best effort through the existing bounded analytics queue.
+
+`infra.money_trace` separately follows the actual database transactions behind the public money
+entries, including grants, top-ups, Hub transfers, batch closes and stale-hold releases. Application
+call scopes also mark preflight and work after ledger updates. `mark_money` only attaches local
+metadata; SQLAlchemy hooks attach a process-unique `app_txn_id` after the connection is acquired and
+read asyncpg's already-known backend PID without executing SQL. A transaction that began before
+the money entry retains its original observed start. Each root transaction ends at commit,
+rollback, invalidation cleanup or session close; savepoints and flushes do not create fictitious
+root transactions. Independent commits in stale-hold recovery produce separate IDs. A backend
+PID is reusable, so investigations must match its time interval and `app_txn_id`, not join all
+records with that PID as one transaction.
+
+`money_stage` marks claim, block locking, balance updates, tag spend, archive-use bookkeeping and
+other money steps; hooks also distinguish flush and commit. Stage exit restores the parent stage
+or `between_stages`. SQL callbacks retain timing and SQLSTATE only, never SQL text, parameters,
+amounts or exception strings. `sql_inflight`, `sql_elapsed_ms`, `last_sql_finished_at` and
+`gap_since_sql_ms` distinguish a statement still awaiting completion from application time after
+the last completed statement. These are client-observed spans: they neither measure server lock
+duration directly nor include the connection-pool wait before a transaction starts.
+
+`money_trace_runner` samples active money transactions once per second. A transaction over one
+second can emit `money_txn_slow` while still open, at most once every five seconds, plus a
+`money_txn_end` record on completion. Both include bounded org/call identities, stage history,
+transaction timestamps and process/build attribution. Active samples inspect only the owning
+task's coroutine locations within `src/treg`, never frame locals or source text. The bounded
+`await_chain` can be partial across SQLAlchemy greenlets; its capture timestamp makes a retained
+sample distinguishable from the ending transaction's current stack. A slow statement alone is
+not proof of deadlock or of which other transaction holds its lock. Correlate PostgreSQL's blocker
+PID with these application records to locate the holder's work.
+
+Collection performs no database/network I/O, adds no awaits to money operations and preserves
+their transaction boundaries and exceptions. Local tracing is independent of the optional
+PostHog key. Active registrations, event queues, stage histories, identities and log output all
+have explicit limits; cumulative drops and diagnostic errors are surfaced by `money_trace_gauge`.
+One daemon thread writes JSON logs through a bounded queue; a blocked logging sink cannot block
+the event loop or indefinitely delay worker shutdown. The minute gauge reports sampler freshness,
+event-loop wakeup delay and output health, without org/call cardinality. A delayed wakeup suggests
+scheduler starvation but does not identify its cause. If the loop is stalled, sampling is also
+stalled; missing samples or dropped records are evidence limitations, never proof of no blockers.
+The runner emits a final partial local window during shutdown. Worker PostHog delivery remains
+best effort; short-lived workers are verified from local logs rather than an assumed final network
+flush. Tests reproduce a real PostgreSQL lock holder and waiter and require an attributable holder
+snapshot before either transaction completes, along with cancellation, cleanup and no-extra-SQL
+checks.
 
 Arena adds `arena_run_started` / `arena_run_completed` after its claim/final save; ordinary
 `tool_called.client=enrich-arena` still attributes each lookup, Try and verification. Browser
