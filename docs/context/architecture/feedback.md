@@ -68,9 +68,9 @@ CLI `cmd_feedback` sends the same payload to its configured registry, reading a 
 from stdin when the message argument is `-` (a terminal is rejected instead of blocking).
 `cmd_feedback_get` retrieves a report through the same team-scoped HTTP read. The CLI rejects
 empty or oversized messages locally and emits structured errors without echoing rejected input;
-transport failures leave submission outcomes explicitly unconfirmed. Both MCP surfaces expose `feedback` with an enum in
-their input schema, relay to the same HTTP intake, and declare a non-destructive, non-idempotent
-local write. Their existing call permissions and transport boundaries remain distinct.
+transport failures leave submission outcomes explicitly unconfirmed. The team `/mcp/` exposes `feedback` with an enum in
+its input schema, relays to the same HTTP intake, and declares a non-destructive, non-idempotent
+local write. `/mcp/v2/` does not expose it: its tools match the Claude directory submission.
 
 `skill.md` mentions feedback in its description and links to `{BASE}/feedback.md`, served by
 `feedback_md` with the deployment's base URL. Detailed syntax and privacy guidance live in that
@@ -153,8 +153,10 @@ and returns `review`, `feedback` or nothing. The router writes it as `X-Treg-Hin
 emits one `hint_attached` analytics event per invitation actually sent, with `kind`, `call_id`,
 `endpoint_id`, the caller's `X-Treg-Client` and the team group. Every surface only translates the
 header: plain HTTP callers read it themselves, the CLI prints one stderr line per kind next to the
-charge line, and both MCP transports render it into their single hint slot with priority
-replay > 402 > review > feedback. Neither MCP transport samples or records anything of its own.
+charge line, and the team `/mcp/` renders it into its single hint slot with priority
+replay > 402 > review > feedback. `/mcp/v2/` has no `review` or `feedback` tool and renders neither
+invitation, like OpenAI's clients on `/mcp/`; for those callers `hint_attached` counts an invitation
+the agent never saw. Neither MCP transport samples or records anything of its own.
 
 A **review** invitation needs a direct catalog call served on treg's own platform key
 (`context.marketplace` exists and its `tier` is `platform`), a 2xx status, no idempotent replay,

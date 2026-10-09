@@ -32,10 +32,11 @@ export const iconUrl: IconUrl = (icon, theme = 'light') =>
 export const command = (base: string) => 'set up treg \u2014 '+base.replace(/\/$/,'')+'/llms.txt'
 
 // Claude.ai adds treg as a custom connector over OAuth: no setup line, no key. This link opens
-// Claude.ai's add-connector dialog with this server's MCP URL filled in.
+// Claude.ai's add-connector dialog with this server's team MCP URL filled in: the whole surface
+// (catalog, the team's own tools, media), always mounted. /mcp/v2 is the catalog-only directory one.
 export const claudeConnectorLink = (base: string) =>
   'https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Treg&connectorUrl='
-  + encodeURIComponent(base.replace(/\/$/,'')+'/mcp/v2')
+  + encodeURIComponent(base.replace(/\/$/,'')+'/mcp/')
 
 export function setupText(command: string, team?: string, token?: string, masked = false) {
   if(!team&&!token) return command
