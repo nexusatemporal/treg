@@ -119,15 +119,15 @@ endpoints:
     test_request: {queryParams: {q: "rust web crawler"}}
     cost:
       type: per_success
-      value: 1
+      value: 0.15
       currency: credit
       per: 1
       unit: call
       source: observed
       source_url: https://api.crawl4ai.com/v1/prices
-      checked: '2026-10-05'
+      checked: '2026-10-09'
       confidence: verified
-      note: "1 credit base times the effort; a cached search cost 0.5 live. The x-c4-cost header settles the actual charge."
+      note: "treg's account price: a flat 0.15 credits per search (observed live 2026-10-09). The x-c4-cost header settles the actual charge."
     verified: '2026-10-05'
     added: '2026-10-06'
     docs_url: https://crawl4ai.com/llms.txt
@@ -150,15 +150,15 @@ endpoints:
     test_request: {queryParams: {q: "why is the sky blue", rich: 1}}
     cost:
       type: per_success
-      value: 2
+      value: 0.15
       currency: credit
       per: 1
       unit: call
       source: observed
       source_url: https://api.crawl4ai.com/v1/prices
-      checked: '2026-10-05'
+      checked: '2026-10-09'
       confidence: verified
-      note: "A rich search cost 2 credits live. The x-c4-cost header settles the actual charge."
+      note: "treg's account price: a flat 0.15 credits per rich search (observed live 2026-10-09). The x-c4-cost header settles the actual charge."
     verified: '2026-10-05'
     added: '2026-10-06'
     docs_url: https://crawl4ai.com/llms.txt
@@ -228,15 +228,15 @@ endpoints:
     test_request: {queryParams: {q: "who founded stripe"}}
     cost:
       type: per_success
-      value: 3
+      value: 2.15
       currency: credit
       per: 1
       unit: call
       source: observed
       source_url: https://api.crawl4ai.com/v1/prices
-      checked: '2026-10-07'
+      checked: '2026-10-09'
       confidence: verified
-      note: "1 credit for the web's own answer (source google_ai_*), 3 for a written answer (prose or JSON, with or without a schema), 0.5 cached; no answer, a 400 or a 503 is free. The 3-credit hold is a written answer; the x-c4-cost header settles the actual charge (1, 3, 0.5 and 0 observed live 2026-10-07)."
+      note: "treg's account price: 0.15 credits for the web's own answer (source google_ai_*), 2.15 for a written answer (0.15 plus the model); no answer, a 400 or a 503 is free. The 2.15-credit hold is a written answer; the x-c4-cost header settles the actual charge (0.15 and 2.15 observed live 2026-10-09)."
     verified: '2026-10-07'
     added: '2026-10-06'
     docs_url: https://crawl4ai.com/llms.txt
@@ -263,15 +263,15 @@ endpoints:
     test_request: {queryParams: {q: "what is a stock split", deep: "0"}}
     cost:
       type: per_success
-      value: 1
+      value: 0.15
       currency: credit
       per: 1
       unit: call
       source: observed
       source_url: https://api.crawl4ai.com/v1/prices
-      checked: '2026-10-07'
+      checked: '2026-10-09'
       confidence: verified
-      note: "1 credit for Google's answer, 0.5 cached, 0 when there is none; the x-c4-cost header settles the charge (1 and 0 observed live 2026-10-07)."
+      note: "treg's account price: 0.15 credits for Google's answer, 0 when there is none; the x-c4-cost header settles the charge (0.15 observed live 2026-10-09)."
     verified: '2026-10-07'
     added: '2026-10-07'
     docs_url: https://crawl4ai.com/llms.txt
