@@ -1852,6 +1852,25 @@ async def test_a_declared_not_found_ends_the_job_and_an_empty_page_is_a_miss(cli
     get_settings.cache_clear()
 
 
+async def test_google_organic_asks_crawl4ai_first_and_falls_back_when_it_is_empty(clients, monkeypatch):
+    """The routed Google organic job sends crawl4ai the query, country, language and the depth rounded
+    up to whole Google pages; an empty answer is a miss and the next provider answers."""
+    monkeypatch.setenv("TREG_PLATFORM_KEY_CRAWL4AI", "PLATFORM-C4AI")
+    monkeypatch.setenv("TREG_PLATFORM_KEY_ANYAPI", "PLATFORM-ANYAPI")
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "crawl4ai,anyapi")
+    get_settings.cache_clear()
+    seen = []
+    monkeypatch.setattr(call_service, "relay", _relay_by_provider({
+        "crawl4ai": [(200, {"results": [], "empty_reason": "rescue_no_results"})],
+        "*": [(200, {"output": {"data": {"results": [{"title": "t", "link": "https://example.com"}]}}})]}, seen))
+    r = await clients.post("/call/treg.google.serp.organic", json={"q": "pizza", "country": "PL", "language": "pl", "limit": 25})
+    assert r.status_code == 200, r.text
+    assert seen[0][0] == "crawl4ai" and seen[0][2] == {"q": "pizza", "country": "pl", "language": "pl", "num": "30"}
+    assert [t["outcome"] for t in r.json()["_treg"]["tried"]] == ["miss", "hit"]
+    assert r.json()["_treg"]["provider"] == "anyapi"
+    get_settings.cache_clear()
+
+
 # ---- web.extract.structured: a new routed job, crawl4ai first ----------------------------------------
 _SCHEMA = {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
 
