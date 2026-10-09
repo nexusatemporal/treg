@@ -277,6 +277,10 @@ endpointConnectLabel(e){
 // A platform is callable today if ANY provider serving it is connected — the card is browsing,
     // not routing, so which one it is stays a question for the platform page.
     // The platform's providers the team holds its own credential for.
+    // A provider this deployment paused (/meta `paused_providers`): its name and message, or null.
+    providerPaused(service){ return ((this.meta&&this.meta.paused_providers)||{})[service]||null; },
+// A platform every provider of which is paused: its tile and shelf say so instead of selling it.
+    platPaused(pl){ const ps=(pl&&pl.providers)||[]; return ps.length>0 && ps.every(s=>this.providerPaused(s)); },
     platOwn(pl){ return ((pl&&pl.providers)||[]).filter(s=>this.catConnected(s)); },
 // What a platform's personal mark means when the team holds a credential for one of its providers:
     // not that the platform works (every platform works, on treg's key) but that calls there use yours.

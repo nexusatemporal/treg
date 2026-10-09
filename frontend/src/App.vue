@@ -65,7 +65,7 @@ export default { ...controller, components: { ...controller.components, ...dialo
         <SearchPage v-if="view==='find'" />
 
         <!-- MARKETPLACE: one integration -->
-        <ProviderPage v-if="view==='provider' && mkProvider" />
+        <ProviderPage v-if="view==='provider' && (mkProvider || mkPaused)" />
 
         <!-- MARKETPLACE: one platform, from the endpoint catalog -->
         <LegacyPlatformPage v-if="view==='platform' && catalogLegacy" />

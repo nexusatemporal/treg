@@ -7,7 +7,25 @@ export default { components: { ToolDrawer, ProviderLogo, ConnectionCard }, setup
 </script>
 
 <template>
-<div class="pl pv" :class="{dopen:!!drawerEp}">
+<!-- Paused on this deployment: out of /oauth/providers, so only /meta names it. The team's
+     connections are kept and listed; nothing here can connect. -->
+<div v-if="!mkProvider && mkPaused" class="pl pv">
+  <header class="pl-hero pv-hero">
+    <nav class="pl-crumbs" aria-label="Breadcrumb"><a href="/app#connections" @click.prevent="go('connections')">Connections</a><span>/</span>{{mkPaused.display_name}}</nav>
+    <div class="pv-id">
+      <ProviderLogo :service="mkService" large />
+      <h1>{{mkPaused.display_name}}</h1>
+    </div>
+  </header>
+  <p class="mk-notice">{{mkPaused.message}}</p>
+  <section class="pl-sec" v-if="mkAccounts.length">
+    <h2 class="pl-h"><span>Connected</span><i></i><em>{{mkAccounts.length}}</em></h2>
+    <div class="pl-grid pl-grid-t">
+      <ConnectionCard v-for="a in mkAccounts" :key="a.id" :a="a" />
+    </div>
+  </section>
+</div>
+<div v-else class="pl pv" :class="{dopen:!!drawerEp}">
           <header class="pl-hero pv-hero">
             <nav class="pl-crumbs" aria-label="Breadcrumb"><a href="/app#connections" @click.prevent="go('connections')">Connections</a><span>/</span>{{mkProvider.display_name}}</nav>
             <div class="pv-id">

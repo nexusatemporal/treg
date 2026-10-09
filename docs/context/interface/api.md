@@ -187,8 +187,12 @@ routed plans and the alternatives named in refusals leave the provider's endpoin
 `GET /oauth/providers` leaves the provider out; `POST /oauth/start`, `POST /connections/token`,
 the resource routes and the extra-credential route refuse with the same 503 body. Existing
 connections are never changed: `GET /connections` returns them with `paused: true`,
-`paused_message` and `provider_display_name`, and the health sweep skips them. The public platform
-and provider pages still list the provider's endpoints.
+`paused_message` and `provider_display_name`, and the health sweep skips them. `GET /meta` carries
+`paused_providers` (`{service: {display_name, message}}`), so the dashboard can say why where the
+provider is still reachable: its catalog tile reads Paused, its shelf and every tool panel show the
+message in place of the call line and the connect and copy buttons, and its provider page shows the
+message and the team's kept connections. The public platform and provider pages still list the
+provider's endpoints.
 
 ## `X-Treg-Served-Via` - this answer came through an overflow relay
 
@@ -415,7 +419,8 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
     virtual-memory cap crashes Go CLIs (gh/stripe/doctl) and `RLIMIT_NPROC` is per-uid, shared with the
     server. Full **filesystem/network** isolation needs a container deploy and is a planned follow-up.
 - **Meta:** `meta` (`GET /meta`, open) → `{public_url, github, google, app_version, treg_version,
-  posthog_key/posthog_host, intercom_app_id, hub, referral}` for the dashboard. `referral` carries the
+  posthog_key/posthog_host, intercom_app_id, hub, referral, paused_providers}` for the dashboard.
+  `paused_providers` is `{service: {display_name, message}}` for `TREG_PAUSED_PROVIDERS`, empty by default. `referral` carries the
   two configured reward amounts so the top-bar entry can name them without `GET /referrals`. `hub`
   is `TREG_HUB_ENABLED`, so the dashboard asks no hub route that could only answer 404. The last three are the opt-in
   third-party keys (analytics, support chat): empty on a deployment that didn't set them, so
