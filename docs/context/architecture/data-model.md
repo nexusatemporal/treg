@@ -644,7 +644,8 @@ scheduler starvation but does not identify its cause. If the loop is stalled, sa
 stalled; missing samples or dropped records are evidence limitations, never proof of no blockers.
 The runner emits a final partial local window during shutdown. Worker PostHog delivery remains
 best effort; short-lived workers are verified from local logs rather than an assumed final network
-flush. Tests reproduce a real PostgreSQL lock holder and waiter and require an attributable holder
+flush. The PostgreSQL CI job also runs the trace acceptance tests: they reproduce a real lock
+holder and waiter and require an attributable holder
 snapshot before either transaction completes, along with cancellation, cleanup and no-extra-SQL
 checks.
 
