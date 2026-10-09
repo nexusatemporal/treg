@@ -387,7 +387,8 @@ closed-beta Extract, and the undocumented Responses route are outside the shared
 Parallel's Search and Extract responses list billed SKUs in `usage[]`, so their rows settle through
 generic `settle: usage` terms with a `[name=...]` selector. Search's turbo/fast and basic/advanced
 modes report the same `sku_search` name at different prices, so each price is its own row with a
-`mode` enum. Extract holds the 20-URL maximum and settles per reported URL.
+`mode` enum. Extract holds the 20-URL maximum and settles per reported URL. An unreadable URL
+returns 200 under `errors[]` with an empty `usage[]`, and the routing miss releases the hold.
 Entity Search reports no usage: its people and companies rows settle the documented flat price
 and allow `match_limit` up to the 100 included results.
 

@@ -3263,6 +3263,28 @@ async def test_parallel_platform_call_settles_its_reported_usage_skus(
     assert seen == ["PLATFORM-PARALLEL", "OWN-PARALLEL"]
 
 
+async def test_parallel_extract_of_only_unreadable_urls_is_free(clients, monkeypatch):
+    """Live 2026-10-09: an unreachable URL comes back under errors[] with an empty usage list."""
+    monkeypatch.setenv("TREG_PLATFORM_KEY_PARALLEL", "PLATFORM-PARALLEL")
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "parallel")
+    get_settings.cache_clear()
+    reply = {"results": [], "usage": [], "errors": [
+        {"url": "https://unreachable.invalid/", "error_type": "connect_error",
+         "http_status_code": None, "content": None}]}
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda request: _dropleads_response(200, reply))) as upstream:
+            monkeypatch.setattr(A.app.state, "http", upstream)
+            before = await _balance(clients)
+            r = await clients.post("/call/parallel.web.extract",
+                                   json={"urls": ["https://unreachable.invalid/"]})
+    finally:
+        get_settings.cache_clear()
+    assert r.status_code == 200, r.text
+    assert r.json() == reply
+    assert await _balance(clients) == before
+
+
 
 
 @pytest.mark.parametrize(('body', 'fee'), [
