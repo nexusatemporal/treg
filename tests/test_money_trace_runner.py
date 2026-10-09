@@ -16,6 +16,7 @@ from treg.infra import money_trace_runner as runner_module
 def trace(monkeypatch):
     pending = []
     calls = []
+    monkeypatch.setattr(runner_module.kv, "_lease_errors", {})
 
     def drain():
         result, pending[:] = list(pending), []
@@ -76,6 +77,56 @@ async def test_local_records_and_shutdown_work_without_posthog(trace, monkeypatc
         assert properties["trace_ended_transactions_total"] == 6
     assert not [task for task in asyncio.all_tasks()
                 if task.get_name() == "treg-money-trace-sample" and not task.done()]
+
+
+async def test_lease_errors_use_periodic_and_worker_exit_logs_only(trace):
+    kv = runner_module.kv
+    logs, gauges = [], []
+    runner = runner_module.MoneyTraceRunner(
+        role="worker", sample_s=0.005, emit_s=0.015,
+        log_event=logs.append, capture_gauge=gauges.append).start()
+    try:
+        kv._record_lease_error("acquire", TimeoutError("private"), kv._clock())
+        await _until(lambda: any(e["event"] == "kv_lease_error" for e in logs))
+        kv._record_lease_error("release", TimeoutError("private"), kv._clock())
+    finally:
+        await runner.stop()
+    details = [e for e in logs if e["event"] == "kv_lease_error"]
+    assert [(e["phase"], e["count"]) for e in details] == [("acquire", 1), ("release", 1)]
+    assert all(e["process_instance"] == "trace-process" and e["build"] == "test-build"
+               and e["role"] == "worker" for e in details)
+    assert all("error_type" not in props and "first_failed_at" not in props for props in gauges)
+    assert kv.drain_lease_errors() == []
+
+
+def test_lease_errors_are_not_drained_after_sink_shutdown(trace):
+    kv = runner_module.kv
+    kv._record_lease_error("release", TimeoutError("private"), kv._clock())
+    runner = runner_module.MoneyTraceRunner(role="worker", capture_gauge=lambda props: None)
+    runner._emit(now=time.monotonic(), local=False)
+    assert len(kv.drain_lease_errors()) == 1
+
+
+def test_lease_error_rate_loss_is_visible_in_same_gauge(trace):
+    kv = runner_module.kv
+    gauges = []
+    kv._record_lease_error("acquire", TimeoutError("private"), kv._clock())
+    runner = runner_module.MoneyTraceRunner(role="worker", logs_per_window=0,
+                                          capture_gauge=gauges.append)
+    runner._emit(now=time.monotonic())
+    assert gauges[0]["log_rate_dropped_total"] == 1
+
+
+def test_lease_error_drain_failure_does_not_hide_gauge(trace, monkeypatch):
+    gauges = []
+
+    def broken():
+        raise RuntimeError("diagnostic failure")
+
+    monkeypatch.setattr(runner_module.kv, "drain_lease_errors", broken)
+    runner = runner_module.MoneyTraceRunner(role="worker", capture_gauge=gauges.append)
+    runner._emit(now=time.monotonic())
+    assert gauges[0]["runner_errors_total"] == 1
 
 
 def test_loop_lag_is_measured_against_planned_wakeup_and_freshness_is_separate(trace):

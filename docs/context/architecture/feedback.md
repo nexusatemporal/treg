@@ -192,6 +192,12 @@ claiming cross-process exclusion. Money admission falls back to database protect
 failure, whereas invitation budgets still fail closed. New tenants add narrow methods, not a
 generic get/set surface.
 
+Lease failures retain fixed phase/type counts and client-observed maximum elapsed time in at most
+21 in-memory buckets. `kv.drain_lease_errors` hands these to the existing money diagnostic runner
+once per reporting window and at worker exit; no lease call writes logs or sends analytics.
+Exception messages, keys, owner tokens and store URLs are never retained. See
+[diagnostic transport and limits](data-model.md#product-analytics-writer-analyticspy).
+
 Each surface's server `instructions` field also tells agents, in one sentence, to rate an
 invited call with `review(call_id, usefulness, reason?)` after using it and then continue, one
 review per invitation. The MCP server description, the `catalog_search` description, `skill.md`

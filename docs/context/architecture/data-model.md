@@ -55,6 +55,7 @@ sources:
   - src/treg/infra/db.py
   - src/treg/infra/money_timing.py
   - src/treg/infra/money_admission.py
+  - src/treg/infra/kv.py
   - src/treg/infra/money_admission_reporting.py
   - src/treg/infra/money_trace.py
   - src/treg/infra/money_trace_runner.py
@@ -71,6 +72,7 @@ sources:
   - tests/test_api_keys.py
   - tests/test_money_timing.py
   - tests/test_money_admission_reporting.py
+  - tests/test_kv_lease_diagnostics.py
   - tests/test_money_trace.py
   - tests/test_money_trace_postgres.py
   - tests/test_money_trace_runner.py
@@ -618,6 +620,22 @@ per populated operation/mode, through the existing web minute timer and final pa
 Workers emit their accumulated window on command exit and attempt a bounded analytics drain;
 the local exit summary is the fallback evidence if delivery fails. There are no per-call network
 events or org/call IDs in these aggregates.
+
+`kv_lease_error` is a local diagnostic log, not a PostHog event. Lease exceptions accumulate in
+`infra.kv` by `phase` (`acquire`, `renew`, `release`) and one of seven `error_type` values:
+`deadline_exceeded` (Python timeout), `redis_timeout`, `authentication`, `permission`, `connection`,
+`response`, or `other`. At most 21 buckets retain counts, UTC first/last failure timestamps and
+`elapsed_max_ms`, plus the configured socket timeout and outer operation deadline in milliseconds.
+Elapsed time is client-observed, including connection setup and event-loop scheduling, not Redis
+server execution time. A type narrows the failing boundary; it does not establish a network or
+server root cause by itself. Normal contention and task cancellation are not lease errors.
+
+`MoneyTraceRunner._emit` drains these buckets on its existing minute cadence and at shutdown,
+before its local sink closes. The existing bounded background log sink adds build/process/role
+and writes them; lease operations perform no diagnostic I/O. No exception message, stack, URL,
+key or owner token is retained. Queue/rate/sink/shutdown loss remains possible and is exposed by
+the runner's existing loss/error counters; the absence of a detail log is not proof of no failure.
+The existing `money_admission_gauge` KV/fallback counters remain the independent aggregate signal.
 
 `wait_total_ms` / `wait_max_ms` cover admission before the session, including failed-acquisition
 cleanup. `execution_total_ms` / `execution_max_ms` cover the admitted application session scope,

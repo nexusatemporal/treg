@@ -18,7 +18,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from . import money_trace
+from . import kv, money_trace
 
 
 _SAMPLE_S = 1.0
@@ -233,6 +233,11 @@ class MoneyTraceRunner:
         return result
 
     def _emit(self, *, now: float, shutdown: bool = False, local: bool = True) -> None:
+        if local:
+            try:
+                self._submit(kv.drain_lease_errors())
+            except Exception:  # noqa: BLE001 - preserve the gauge even if a detail drain fails
+                self._diagnostic_errors += 1
         try:
             props = self._properties(now)
             props["shutdown"] = shutdown
