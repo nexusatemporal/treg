@@ -66,6 +66,7 @@ _CONNECT_HTTP_ERRORS = {
     "invalid_name": 422,
     "name_taken": 409,
     "name_in_use": 409,
+    "provider_paused": 503,
 }
 
 

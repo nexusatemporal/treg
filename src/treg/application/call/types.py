@@ -50,6 +50,8 @@ _BLAME_BY_KIND: dict[str, Blame] = {
     # treg's OWN vendor account for the provider is out (balance/quota) — a 503 the caller cannot
     # fix, answered before any hold exists, with the same-capability alternatives named.
     "provider_capacity": "treg",
+    # This deployment paused the provider (TREG_PAUSED_PROVIDERS): refused before any hold.
+    "provider_paused": "treg",
     # Routed endpoints (treg.<capability>): the caller's identity fits no provider, or the
     # ceiling they set is below the cheapest candidate, or every candidate failed.
     "route_no_candidate": "caller",

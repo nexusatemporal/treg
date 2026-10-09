@@ -53,7 +53,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.exceptions import MCPError
 from mcp.types import AudioContent, CallToolResult, METHOD_NOT_FOUND, TextContent, ToolAnnotations
 
-from . import analytics, audit, hints
+from . import analytics, audit, hints, oauth_providers
 from .application import catalog_find as find_app
 from .application import catalog_search as search_app
 from .application import search_experiment
@@ -1160,8 +1160,12 @@ async def _catalog_get_impl(
 ) -> CatalogGetOut:
     """Goes through the HTTP route rather than the store: that route attaches the observed
     reliability figures and the capability siblings, and those come from the database."""
-    if surface.hides(catalog_store.load().by_id.get(endpoint_id)):
+    ep = catalog_store.load().by_id.get(endpoint_id)
+    if surface.hides(ep):
         return {"error": f"{endpoint_id} is not available here: {_DIRECTORY_HIDDEN_NOTE}"}
+    if ep is not None and catalog_store.paused(ep):
+        # `provider` is a dict in this schema, so the typed code rides in `error`, the words in `detail`.
+        return {"error": "provider_paused", "detail": oauth_providers.paused_message(ep["provider"])}
     token = _bearer(ctx)
     api_context = (_api(token) if surface is _TEAM_SURFACE
                    else _api(token, client_name=surface.client_name))

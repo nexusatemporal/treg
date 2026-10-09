@@ -1409,6 +1409,15 @@ the provider's OpenAPI bundle without a live probe and says so with `skipped` an
 hand-maintained (no ingester reads Lusha's client-rendered reference), so the "regenerated wholesale"
 caveat above does not apply to it and the tombstone survives.
 
+### Paused providers — a deployment setting, not a row
+
+`TREG_PAUSED_PROVIDERS` names providers this deployment cannot serve right now. `store.paused(ep)`
+takes their rows out of `_match` (so `search`, `candidates`, `near_misses`, `rank_band`), out of
+`added_rows`, out of find's recall and name rows, out of `_capability_alternatives`, and out of
+routed plans. `by_id` keeps them, so a direct lookup or call answers `503 provider_paused` rather
+than "unknown endpoint" (`interface/api.md`). The rows themselves do not change: lifting the pause
+restores them as they were.
+
 ### `platform_blocked:` — works upstream, but not on treg's plan
 
 A third state sits between "offer" and "tombstone": the route works and the price is real, but

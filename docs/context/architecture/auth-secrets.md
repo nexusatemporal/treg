@@ -538,6 +538,11 @@ so the caller sees both axes. `_probe()` merges a binding's query onto the URL w
 than passing `params=` (httpx would otherwise **replace** a probe path's own query string, e.g. YouTube's
 `?part=snippet&mine=true`, and fail a healthy credential).
 
+A provider in `TREG_PAUSED_PROVIDERS` is skipped whole: no refresh, no probe, no verdict, and no
+expiry alert. A paused upstream would fail every check, and the connection must be intact when the
+pause is lifted. No job deletes or disables a connection after failed checks; removal is a user's
+disconnect only.
+
 ## Storage / security posture (MVP)
 TLS-only in transit (paste/upload over https, like GitHub/Vercel secrets); Fernet at rest. Per-membership
 tokens gate the API (`require_member`, [interface/api.md](../interface/api.md)) and scope every call to an

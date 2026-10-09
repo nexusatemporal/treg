@@ -62,6 +62,16 @@ export const oauthGroups: OAuthGroup[] = [
   {label:'SEO on your own site',items:[{s:'google-analytics',n:'Google Analytics'},{s:'google-search-console',n:'Search Console'},{s:'google-business-profile',n:'Business Profile'}], soon:[]},
 ]
 
+// The chips this deployment offers: a provider left out of /oauth/providers (a paused one) loses its
+// chip, and a group left empty goes with it. Before the listing arrives every chip shows.
+export function listedOauthGroups(listing: { service: string }[] | null | undefined): OAuthGroup[] {
+  if (!listing || !listing.length) return oauthGroups
+  const offered = new Set(listing.map(p => p.service))
+  return oauthGroups
+    .map(g => ({ ...g, items: g.items.filter(p => offered.has(p.s)) }))
+    .filter(g => g.items.length)
+}
+
 // A logo that fails to load leaves its slot instead of a broken-image glyph.
 export function hideBrokenImage(event: Event) {
   (event.target as HTMLElement).style.visibility = 'hidden'

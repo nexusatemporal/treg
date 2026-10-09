@@ -167,6 +167,8 @@ Notes:
   (not your balance; nothing charged). Body has `resets_at` and `alternatives` (same capability,
   other providers) — choose one, or use your own key. treg never switches providers for you.
   treg re-checks the provider about once a minute, so a retry after a minute can succeed.
+- HTTP **503** `provider_paused` = this deployment paused that provider (nothing charged, nothing
+  sent). Read `message`. The existing connection is kept; do not reconnect, it works again when resumed.
 - An org tool or secret for the provider always wins over an anonymous route or treg's key,
   automatically — the catalog is the fallback, not a replacement for keys the team already has.
 - **Choosing between providers of one capability — the procedure.** `treg catalog get <id>` lists

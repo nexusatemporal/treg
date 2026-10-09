@@ -3961,6 +3961,25 @@ def get(service: str) -> OAuthProvider | None:
     return REGISTRY.get(service)
 
 
+def is_paused(service: str | None) -> bool:
+    """Whether this deployment has paused `service` (TREG_PAUSED_PROVIDERS). A paused provider is
+    hidden from search and connect and refused at call time; its connections are kept untouched."""
+    return bool(service) and service.strip().lower() in get_settings().paused_providers_set
+
+
+def paused_message(service: str) -> str:
+    provider = REGISTRY.get(service)
+    return get_settings().paused_provider_message(
+        service, provider.display_name if provider else service)
+
+
+def paused_detail(service: str, endpoint_id: str | None = None) -> dict:
+    """The typed body every paused refusal carries: calls, connects and catalog_get alike."""
+    return {"error": "provider_paused", "provider": service,
+            **({"endpoint_id": endpoint_id} if endpoint_id else {}),
+            "message": paused_message(service)}
+
+
 def legacy_aliases(url: str) -> list[str]:
     """The same call on each legacy base of the provider that serves `url` (empty for most). A
     deny rule a team wrote against the old host still covers calls on the new one."""
@@ -4200,7 +4219,7 @@ def listing() -> list[dict]:
         # Grouped first, alphabetical within a shelf — so the dashboard can render the shelves by
         # walking the list once instead of re-sorting what the registry already knows.
         for p in sorted(
-            REGISTRY.values(),
+            (p for p in REGISTRY.values() if not is_paused(p.service)),
             key=lambda p: (
                 CATEGORY_ORDER.index(p.category) if p.category in CATEGORY_ORDER else len(CATEGORY_ORDER),
                 p.display_name,

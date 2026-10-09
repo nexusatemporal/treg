@@ -170,6 +170,26 @@ path or an exhausted reading from the sweep lets one call a minute through as a 
 its 2xx, so the `message` says a retry in a minute may succeed; otherwise it lasts until `resets_at`. Not the pool-saturation 503
 (`treg_saturated`), which is a different exit. See `architecture/proxy-model.md` § Platform capacity.
 
+## `503 provider_paused` - this deployment paused the provider
+
+`TREG_PAUSED_PROVIDERS` (comma-separated service ids) pauses a provider on one deployment. Every
+call that would reach it is refused **before any hold, token refresh or upstream request** with
+`{"detail": {"error": "provider_paused", "provider", "endpoint_id"?, "message"}}`, `X-Treg-Error: 1`,
+no `X-Treg-Cost-Micro`, `refused_by="paused"` on the audit row. That covers a catalog id
+(`resolve_marketplace_target`), a connection's own tool, and a URL passthrough to its hosts (both
+resolve to the tool bound to the provider's connection; refused once its secrets load in
+`service._execute_call`), plus `GET /catalog/endpoints/{id}/access`. `message` is the default
+sentence or the service's entry in `TREG_PAUSED_PROVIDER_MESSAGES`.
+
+The rest of the surface agrees: catalog search, `/catalog/find`, the MCP `catalog_search` tools,
+routed plans and the alternatives named in refusals leave the provider's endpoints out;
+`GET /catalog/endpoints/{id}` and MCP `catalog_get` answer `provider_paused` instead of the entry;
+`GET /oauth/providers` leaves the provider out; `POST /oauth/start`, `POST /connections/token`,
+the resource routes and the extra-credential route refuse with the same 503 body. Existing
+connections are never changed: `GET /connections` returns them with `paused: true`,
+`paused_message` and `provider_display_name`, and the health sweep skips them. The public platform
+and provider pages still list the provider's endpoints.
+
 ## `X-Treg-Served-Via` - this answer came through an overflow relay
 
 `GET/PATCH /orgs/{id}/settings` carries `platform_overflow` (default `true`); `false` opts the team out -

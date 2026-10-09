@@ -296,10 +296,17 @@ def _dig(obj, dotted: str):
     return obj
 
 
+def _refuse_paused(service: str | None) -> None:
+    """A paused provider (TREG_PAUSED_PROVIDERS) takes no new connect and no upstream work on an
+    existing connection; the connection itself is left exactly as it is."""
+    if oauth_providers.is_paused(service):
+        raise ConnectError("provider_paused", oauth_providers.paused_detail(service))
+
+
 class ConnectError(Exception):
     """A framework-neutral connection refusal translated by the HTTP router."""
 
-    def __init__(self, kind: str, detail: str):
+    def __init__(self, kind: str, detail: str | dict):
         self.kind = kind
         self.detail = detail
         super().__init__(kind)
@@ -330,6 +337,7 @@ async def start_oauth_connection(
                     "unknown_provider",
                     f"unknown provider {provider_name!r} (known: {known})",
                 )
+            _refuse_paused(provider_name)
             chosen_capability = capability or provider.connect_default_capability
             try:
                 scopes = provider.scopes_for(chosen_capability)
@@ -380,6 +388,7 @@ async def start_oauth_connection(
             ))).scalars().first()
             if target is None:
                 raise ConnectError("unknown_connection", "unknown connection")
+            _refuse_paused(target.provider)
             if provider_name and target.provider != provider_name:
                 raise ConnectError(
                     "invalid_provider",
@@ -585,6 +594,7 @@ async def connect_with_pasted_secret(
     provider = oauth_providers.get(provider_name)
     if provider is None or not provider.uses_pasted_secret:
         raise ConnectError("invalid_token_provider", "this provider is connected by consent, not a token")
+    _refuse_paused(provider_name)
     token = raw_token.strip()
     if not token:
         raise ConnectError("invalid_token", f"{provider.token_label or 'Token'} is required")
@@ -792,6 +802,13 @@ async def list_connections(*, org_id: int) -> list[dict]:
         out = []
         for s in rows:
             view = connection_refresh.connection_view(s)
+            if oauth_providers.is_paused(s.provider):
+                # Kept and untouched while paused: the dashboard shows this instead of a health error.
+                # Its provider is out of /oauth/providers then, so the name rides on the row itself.
+                view["paused"] = True
+                view["paused_message"] = oauth_providers.paused_message(s.provider)
+                view["provider_display_name"] = getattr(
+                    oauth_providers.get(s.provider), "display_name", s.provider)
             provider = oauth_providers.get(s.provider) if s.provider else None
             if provider is not None:
                 method_name = provider.authorization_method_name(s.authorization_method)
@@ -832,6 +849,7 @@ async def _connection_for_upstream(
     """Load one connection and delegate freshness to the single domain implementation."""
     async with session_maker() as db:
         secret = await _owned_connection(secret_id, org_id, db)
+        _refuse_paused(secret.provider)
         await connection_refresh.ensure_fresh(
             secret, db, HTTPXOAuthRefreshPort(client),
         )
@@ -1182,6 +1200,7 @@ async def supply_extra_credential(
 ) -> dict:
     async with session_maker() as db:
         secret = await _owned_connection(secret_id, org_id, db)
+        _refuse_paused(secret.provider)
         provider = oauth_providers.get(secret.provider)
         if provider is None or not provider.needs_extra_credential:
             raise ConnectError("no_extra_credential", "this provider needs no extra credential")
