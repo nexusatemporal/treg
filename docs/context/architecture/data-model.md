@@ -53,6 +53,7 @@ sources:
   - src/treg/alembic/versions/0066_endpointdaystat_verdicts.py
   - src/treg/timeutil.py
   - src/treg/infra/db.py
+  - src/treg/infra/money_timing.py
   - src/treg/domain/referrals.py
   - src/treg/audit.py
   - src/treg/application/evidence_retention.py
@@ -64,6 +65,7 @@ sources:
   - tests/test_alembic_expand_safety.py
   - tests/test_redundant_index_migration.py
   - tests/test_api_keys.py
+  - tests/test_money_timing.py
 related:
   - architecture/archive.md
   - architecture/proxy-model.md
@@ -575,6 +577,27 @@ gated on `fresh`). Drained in the lifespan `finally` **last** - after `audit.dra
 strands those events behind a cancelled flusher. The engine adds Postgres pool
 hygiene (`pool_pre_ping`/`pool_recycle`/sizing) for non-SQLite URLs, and `verify_db` refuses to start with
 no `TREG_SECRET_KEY` on a real DB (an ephemeral key would lose every stored secret on restart).
+
+`infra.money_timing.observe_money` measures the ordinary call's `reserve`, `close` and `deferred`
+session scopes with local monotonic timers. These cover pool acquisition and session cleanup,
+including rollback on failure; reserve also includes its post-commit balance reload. They are not
+pure row-lock durations or a census of all money writers: Hub, billing, direct ledger callers and
+the asynchronous-task worker are outside this observation boundary. Fixed `preflight`, `ledger`,
+`commit` and `post_commit` phases separate admission checks, ledger work, commit and the extra read;
+the ledger phase may itself include the lazy reaper's independent commits. No timer issues SQL,
+awaits, changes a transaction boundary or suppresses a business exception/cancellation.
+
+The existing `bootstrap.pool_gauge` timer drains at most three `money_operation_gauge` events per
+minute, with one final partial window before analytics shutdown. They carry completed scope counts,
+failures (including ordinary refusals), cancellations, SQLSTATE `40P01` failures, elapsed totals and
+maxima, disjoint duration buckets, batch-item counts, per-phase totals/maxima and active-scope peaks.
+An operation's entire duration belongs to its completion window; an active scope crossing a boundary
+remains in the next window's in-flight count. Those counts are not checked-out DB connections. A
+`process_instance` token joins each summary to the same process's `db_pool_gauge`. Neither events nor
+retained aggregates have per-team cardinality. At most the slowest completed scope over one second
+per operation/window produces a WARNING log with its numeric org ID when available, validated opaque
+call ID, batch size, outcome and phase durations; no amount, body or exception message is logged.
+These observations remain best effort through the existing bounded analytics queue.
 
 Arena adds `arena_run_started` / `arena_run_completed` after its claim/final save; ordinary
 `tool_called.client=enrich-arena` still attributes each lookup, Try and verification. Browser

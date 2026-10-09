@@ -304,6 +304,10 @@ def test_dataplane_derived_write_allowlist_is_explicit_and_live() -> None:
         # a commit injected into the real logic sailed past the wrapper-keyed version of this test.
         money._settle_in_transaction,
         money._release_in_transaction,
+        money._settle_claimed,
+        money._release_claimed,
+        money.close_holds_in_transaction,
+        money.settle_to_in_transaction,
         money.settle_in_transaction,
         money.release_in_transaction,
         # The funding primitives are their own real bodies - no committing wrapper exists to hide

@@ -16,6 +16,7 @@ from ...domain.governance import budgets as budget_policy
 from ...domain.governance.usage import _day_start_utc
 from ...domain.identity.access import Caller
 from ...infra.db import session_maker
+from ...infra.money_timing import observe_money
 from ...models import CallRecord, Org, TagBudget
 from .intake import CallMeta, _NO_META
 from .resolve import MarketplaceCall
@@ -234,35 +235,40 @@ async def _platform_reserve(mk: MarketplaceCall, caller: Caller, meta: CallMeta 
     auto_on = bool(caller.org.autotopup_enabled and caller.org.autotopup_consented_at)
     prefs = billing.autotopup_prefs(caller.org) if auto_on else None
     try:
-        async with session_maker() as db:
-            # The builder's own per-tag ceilings first: a refusal that belongs to ONE of their users
-            # must not surface as the team-wide balance error, which names the builder's private numbers.
-            await _enforce_tag_budgets(caller, meta, db, add_micro=mk.estimate_micro)
-            await _enforce_platform_daily_cap(caller, mk.estimate_micro, db)
-            await _enforce_trial_allowance(caller, mk.provider, mk.endpoint_id, db)
-            try:
-                mk.call_id = await ledger.reserve_in_transaction(
-                    db, caller.org_id, mk.endpoint_id, mk.estimate_micro,
-                    meta={"tier": "oauth" if mk.billed_oauth else "platform",
-                          "provider": mk.provider, "cost_type": mk.cost_type},
-                    tags=meta.tags, call_id=call_ref)
-            except ledger.InsufficientBalance:
-                await db.rollback()
-                # A refused call asks for a refill too. Only a call that got through used to, so a
-                # team at $0 with auto top-up on stayed empty until something else ran, refusing
-                # every call meanwhile. One read by primary key, refusals only;
-                # the wait check in `maybe_schedule_autotopup` keeps it from starting a task per call.
-                if auto_on:
+        with observe_money("reserve", org_id=caller.org_id, call_id=call_ref) as timing:
+            async with session_maker() as db:
+                # The builder's own per-tag ceilings first: a refusal that belongs to ONE of their users
+                # must not surface as the team-wide balance error, which names the builder's private numbers.
+                with timing.phase("preflight"):
+                    await _enforce_tag_budgets(caller, meta, db, add_micro=mk.estimate_micro)
+                    await _enforce_platform_daily_cap(caller, mk.estimate_micro, db)
+                    await _enforce_trial_allowance(caller, mk.provider, mk.endpoint_id, db)
+                try:
+                    with timing.phase("ledger"):
+                        mk.call_id = await ledger.reserve_in_transaction(
+                            db, caller.org_id, mk.endpoint_id, mk.estimate_micro,
+                            meta={"tier": "oauth" if mk.billed_oauth else "platform",
+                                  "provider": mk.provider, "cost_type": mk.cost_type},
+                            tags=meta.tags, call_id=call_ref)
+                except ledger.InsufficientBalance:
+                    await db.rollback()
+                    # A refused call asks for a refill too. Only a call that got through used to, so a
+                    # team at $0 with auto top-up on stayed empty until something else ran, refusing
+                    # every call meanwhile. One read by primary key, refusals only;
+                    # the wait check in `maybe_schedule_autotopup` keeps it from starting a task per call.
+                    if auto_on:
+                        org = await db.get(Org, caller.org_id)
+                        if org is not None:
+                            billing.maybe_schedule_autotopup(org)
+                    raise
+                with timing.phase("commit"):
+                    await db.commit()
+                # The conditional UPDATE bypasses an ORM instance. Reload after commit so auto-top-up sees
+                # the balance crossing that triggered this reservation.
+                with timing.phase("post_commit"):
                     org = await db.get(Org, caller.org_id)
                     if org is not None:
                         billing.maybe_schedule_autotopup(org)
-                raise
-            await db.commit()
-            # The conditional UPDATE bypasses an ORM instance. Reload after commit so auto-top-up sees
-            # the balance crossing that triggered this reservation.
-            org = await db.get(Org, caller.org_id)
-            if org is not None:
-                billing.maybe_schedule_autotopup(org)
     except ledger.InsufficientBalance as exc:
         wallet = f"treg's {mk.provider} " + ("app (pay-per-use)" if mk.billed_oauth else "key")
         # For a billed OAuth call "connect your own key" is not the fix — the connection already

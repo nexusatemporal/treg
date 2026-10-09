@@ -40,6 +40,7 @@ sources:
   - src/treg/routers/orgs.py
   - src/treg/routers/referrals.py
   - tests/test_call_architecture.py
+  - tests/test_money_lock_order.py
   - tests/test_marketplace_call.py
   - tests/test_asynctasks.py
 related:
@@ -212,11 +213,43 @@ marketing expense and never refundable; purchased credit is a deferred-revenue l
 refundable and disputable - so spending promo first keeps the refundable pool as small as possible
 for as long as possible.
 
-`_consume_blocks` acquires `CreditBlock` row locks with `ORDER BY CreditBlock.id FOR UPDATE`.
-The unique primary-key order is shared by concurrent settlements and prevents opposite scan-order
-locking. It is independent of consumption priority: the subsequent `blocks.sort` still selects
-promotional credit first, then age and ID. Keep both the row lock (which prevents lost deductions)
-and that business sort. This is the repository's sole explicit CreditBlock row-lock query.
+`_consume_blocks` uses `_lock_blocks` to acquire `CreditBlock` row locks with
+`ORDER BY CreditBlock.org_id, CreditBlock.id FOR UPDATE`. The query refreshes any objects already
+in the session's identity map from the locked rows, so a previously read balance cannot overwrite
+a concurrent committed deduction. Lock order is independent of consumption priority: the
+subsequent `blocks.sort` still selects promotional credit first, then age and ID.
+
+### Composing money operations without reversing locks
+
+A single settlement claims its Hold, locks its blocks, and updates Org only when the refund or
+daily-spend delta requires it. Reserve and release keep their existing balance-update timing;
+there is no general Org lock at the start of every money operation.
+
+Several closes in one transaction must use `close_holds_in_transaction` with `HoldClose` items.
+The helper claims all Hold IDs in sorted order before taking any block or balance locks, then
+locks all blocks needed by positive settlements in the order above. It applies the closes in Org
+ID order while preserving each org's original operation and consumption order. It reuses the
+locked block collection: querying again after a balance update could lock a concurrently added
+block in reverse order. Duplicate Hold IDs keep the first operation and later occurrences return
+zero, just as repeated conditional claims did. The caller still owns the one commit or rollback;
+enter this helper before other money writes in the transaction.
+
+`close_deferred` uses that helper, then writes archive-use marks in `(org_id, key_hash)` order in
+the same transaction. Repeated marks still each increment the usage counter. Mark ordering also
+matters for zero-cost batches, which may acquire neither block nor balance locks. Cancellation
+compensation closes the parent and overflow holds through the same batch helper.
+
+Hub payments consume the payer's blocks before balance writes. If both payer and payee need a
+balance update, `settle_to_in_transaction` acquires those Org rows in ID order with
+`FOR NO KEY UPDATE`, compatible with foreign-key checks. An exact-cost payment does not add a
+payer balance lock. Referral payouts likewise stage their actual grants in Org ID order; their
+existing claim and payout commit boundaries remain separate.
+
+Real PostgreSQL tests exercise competing batches, single settlements, transfers, claims and
+rollbacks. These rules cover the application compositions above, not arbitrary transactions that
+write other tables first. During rollout, retire old batch and cross-org writers before relying
+on consistent ordering. Lock ordering removes these circular waits; it does not bound the time
+a slow transaction may hold a lock.
 
 **Margin is applied inside the module** (`with_margin`), at reserve AND settle, and the rate in force
 is recorded on every entry - so a rate change cannot retroactively rewrite what a call cost, and two

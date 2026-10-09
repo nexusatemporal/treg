@@ -43,6 +43,7 @@ to strand in the first place.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
@@ -387,11 +388,19 @@ async def _settle_in_transaction(
     hold = await _claim_hold(db, call_id)
     if hold is None:
         return 0, False
+    return await _settle_claimed(db, call_id, hold, actual_micro, meta=meta), True
+
+
+async def _settle_claimed(
+    db: AsyncSession, call_id: str, hold: _ClaimedHold, actual_micro: int | None,
+    *, meta: dict | None = None, blocks: list[CreditBlock] | None = None,
+) -> int:
     reserved = hold.amount_micro
     # ONE instant for this settlement — shared by the ledger entry and the tag rows below.
     settled_at = _now()
     settled = reserved if actual_micro is None else max(0, with_margin(int(actual_micro)))
-    consumed, shortfall = await _consume_blocks(db, hold.org_id, settled, call_id, hold.endpoint_id)
+    consumed, shortfall = await _consume_blocks(
+        db, hold.org_id, settled, call_id, hold.endpoint_id, blocks=blocks)
     # The hold came out of the balance at reserve time; give back whatever the call didn't use. If the
     # observed cost overran the estimate the delta is negative, which correctly takes MORE balance —
     # the next reserve is the gate that stops an overrun from compounding.
@@ -421,7 +430,7 @@ async def _settle_in_transaction(
     # at reserve time, such a call showed up in the org total but not in any tag total.
     await db.execute(update(TagSpend).where(TagSpend.hold_id == call_id)
                      .values(amount_micro=consumed, settled=True, created_at=settled_at))
-    return consumed, True
+    return consumed
 
 
 async def settle_to_in_transaction(
@@ -447,6 +456,13 @@ async def settle_to_in_transaction(
     settled_at = _now()
     consumed, shortfall = await _consume_blocks(db, hold.org_id, pay, call_id, hold.endpoint_id)
     spent_delta = consumed - (amount if hold.created_at >= _day_start() else 0)
+    # A refund and a seller credit update two existing balances. Acquire those locks in the same
+    # order as multi-org batches, AFTER consuming blocks. Exact-cost payments only update the
+    # payee, and must not acquire an otherwise unnecessary payer balance lock.
+    if consumed > 0 and (amount != consumed or spent_delta) and hold.org_id != payee_org_id:
+        with db.no_autoflush:
+            await db.execute(select(Org.id).where(Org.id.in_([hold.org_id, payee_org_id]))
+                             .order_by(Org.id).with_for_update(key_share=True))
     if amount != consumed or spent_delta:
         await _add_balance(db, hold.org_id, amount - consumed, spent_delta_micro=spent_delta)
     await _entry(
@@ -492,6 +508,13 @@ async def _release_in_transaction(
     hold = await _claim_hold(db, call_id)
     if hold is None:
         return 0, False
+    return await _release_claimed(db, call_id, hold, reason=reason, meta=meta), True
+
+
+async def _release_claimed(
+    db: AsyncSession, call_id: str, hold: _ClaimedHold, *, reason: str = "",
+    meta: dict | None = None,
+) -> int:
     amount = hold.amount_micro
     # Same rule as settle: a hold counted today leaves today's counter; an older one never was in it.
     spent_delta = -amount if hold.created_at >= _day_start() else 0
@@ -501,11 +524,72 @@ async def _release_in_transaction(
     # Nothing was billable, so nothing is attributable: the tag rows go with the hold. Leaving them
     # would bill a builder's user for a call the provider never completed.
     await db.execute(delete(TagSpend).where(TagSpend.hold_id == call_id))
-    return amount, True
+    return amount
+
+
+class HoldClose(NamedTuple):
+    """One existing settle or release to compose into an atomic batch."""
+
+    call_id: str
+    settle: bool
+    actual_micro: int | None = None
+    reason: str = ""
+    meta: dict | None = None
+
+
+async def close_holds_in_transaction(db: AsyncSession, closings: Sequence[HoldClose]) -> list[int]:
+    """Close a batch without interleaving Hold, CreditBlock and Org lock acquisition.
+
+    The caller owns commit/rollback and must enter before other money writes in this transaction.
+    Claim all holds in ID order, lock the complete block set once, then apply closes in org order.
+    Within each org the original operation/consumption order is preserved. Results follow input
+    order; already-claimed holds (including repeated IDs in this batch) return zero.
+    """
+    results = [0] * len(closings)
+    first: dict[str, int] = {}
+    for index, closing in enumerate(closings):
+        first.setdefault(closing.call_id, index)
+    claimed: list[tuple[int, _ClaimedHold]] = []
+    for call_id, index in sorted(first.items()):
+        hold = await _claim_hold(db, call_id)
+        if hold is not None:
+            claimed.append((index, hold))
+    block_orgs = {
+        hold.org_id for index, hold in claimed
+        if closings[index].settle and (
+            hold.amount_micro if closings[index].actual_micro is None
+            else max(0, with_margin(int(closings[index].actual_micro)))
+        ) > 0
+    }
+    blocks_by_org: dict[int, list[CreditBlock]] = {org_id: [] for org_id in block_orgs}
+    if block_orgs:
+        for block in await _lock_blocks(db, block_orgs):
+            blocks_by_org[block.org_id].append(block)
+    for index, hold in sorted(claimed, key=lambda item: (item[1].org_id, item[0])):
+        closing = closings[index]
+        if closing.settle:
+            results[index] = await _settle_claimed(
+                db, closing.call_id, hold, closing.actual_micro, meta=closing.meta,
+                blocks=blocks_by_org.get(hold.org_id, []))
+        else:
+            results[index] = await _release_claimed(
+                db, closing.call_id, hold, reason=closing.reason, meta=closing.meta)
+    return results
+
+
+async def _lock_blocks(db: AsyncSession, org_ids: set[int]) -> list[CreditBlock]:
+    # Lock order is independent of consumption priority. A batch must keep this fixed collection:
+    # querying again after a balance write could acquire a concurrently funded block out of order.
+    return list((await db.execute(
+        select(CreditBlock).where(CreditBlock.org_id.in_(org_ids), CreditBlock.remaining_micro > 0)
+        .order_by(CreditBlock.org_id, CreditBlock.id).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalars().all())
 
 
 async def _consume_blocks(
     db: AsyncSession, org_id: int, amount_micro: int, call_id: str, endpoint_id: str,
+    *, blocks: list[CreditBlock] | None = None,
 ) -> tuple[int, int]:
     """Draw `amount_micro` from the org's blocks, promotional-first then oldest-purchased-first.
     Returns (consumed, shortfall). Does NOT commit — the caller's transaction owns it.
@@ -521,11 +605,8 @@ async def _consume_blocks(
     # Postgres locks the rows; SQLite ignores FOR UPDATE and is single-writer anyway.
     # Lock in unique primary-key order so concurrent settles cannot acquire blocks in reverse
     # order. This is NOT consumption priority: keep the promotional/age sort below unchanged.
-    blocks = (await db.execute(
-        select(CreditBlock).where(CreditBlock.org_id == org_id, CreditBlock.remaining_micro > 0)
-        .order_by(CreditBlock.id)
-        .with_for_update()
-    )).scalars().all()
+    if blocks is None:
+        blocks = await _lock_blocks(db, {org_id})
     blocks.sort(key=lambda b: (_KIND_ORDER.get(b.kind, 99), b.created_at or _now(), b.id))
     left, consumed = amount_micro, 0
     for block in blocks:
