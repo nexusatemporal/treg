@@ -1135,7 +1135,7 @@ def _capability_alternatives(ep: dict, *, limit: int = 3) -> list[str]:
     settings = get_settings()
     ranked = []
     for alt in cat.for_capability(capability):
-        if alt["id"] == ep["id"]:
+        if alt["id"] == ep["id"] or catalog_store.paused(alt):
             continue
         cost = cat.cost_view(alt.get("cost"), alt["provider"])
         usd = cost.get("usd") if cost else None
@@ -2329,6 +2329,13 @@ def _provider_capacity_unavailable(ep: dict, service: str, resets, *,
     })
 
 
+def provider_paused(service: str, endpoint_id: str | None = None) -> ResolutionFailed:
+    """This deployment paused `service` (TREG_PAUSED_PROVIDERS): refused before any hold, charge
+    or upstream request, on the catalog road and on a connection's own tool alike."""
+    return ResolutionFailed("provider_paused", status_code=503,
+                            detail=oauth_providers.paused_detail(service, endpoint_id))
+
+
 async def resolve_marketplace_target(
     ep: dict,
     *,
@@ -2341,6 +2348,8 @@ async def resolve_marketplace_target(
     request_headers=None,
     authorization_method: str = "",
 ) -> MarketplaceCall:
+    if oauth_providers.is_paused(ep.get("provider")):
+        raise provider_paused(ep["provider"], ep["id"])
     # The exhausted view is refreshed here — before the resolution session opens, so at most one
     # connection is held at a time, and before any hold exists. Cached 60 s; a stale or empty view
     # never refuses (plan §4.1: blocking fires on confirmed signals only).

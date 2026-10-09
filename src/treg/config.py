@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from functools import lru_cache
 from typing import Literal
@@ -673,6 +674,15 @@ class Settings(BaseSettings):
     # Comma-separated registry review keys that do not yet have production access. Remove one key
     # when its review is approved; set an explicit empty value when all reviews are complete.
     oauth_review_pending: str = "instagram-login,page-messages"
+    # Comma-separated provider service ids this deployment has paused (TREG_PAUSED_PROVIDERS), e.g.
+    # one whose upstream access this deployment's app has lost. A paused provider leaves catalog
+    # search and the connect listing, and its calls and connects are refused with a typed 503
+    # `provider_paused` before any hold or upstream request. Existing connections are kept as they
+    # are and work again once the id is removed. Empty (the default) pauses nothing.
+    paused_providers: str = ""
+    # Optional JSON object {service: message} (TREG_PAUSED_PROVIDER_MESSAGES) replacing the default
+    # paused message for a service. Malformed JSON fails at boot rather than showing nothing.
+    paused_provider_messages: str = ""
     # Advertising OAuth platforms — unset by default, so these providers list as "not configured"
     # until this deployment registers its own developer app on each network.
     microsoft_ads_client_id: str = ""
@@ -719,6 +729,19 @@ class Settings(BaseSettings):
             email, sep, digest = part.partition("=")
             if not sep or "@" not in email or not re.fullmatch(r"[0-9a-fA-F]{64}", digest.strip()):
                 raise ValueError("fixed_login_codes entries must be email=<64-hex sha256>")
+        return v
+
+    @field_validator("paused_provider_messages")
+    @classmethod
+    def _paused_provider_messages_shape(cls, v: str) -> str:
+        if v.strip():
+            try:
+                parsed = json.loads(v)
+            except ValueError:
+                raise ValueError("paused_provider_messages must be a JSON object") from None
+            if not isinstance(parsed, dict) or not all(
+                    isinstance(k, str) and isinstance(m, str) and m.strip() for k, m in parsed.items()):
+                raise ValueError("paused_provider_messages must map service ids to non-empty strings")
         return v
 
     @property
@@ -825,6 +848,22 @@ class Settings(BaseSettings):
         return frozenset(
             key.strip().lower() for key in self.oauth_review_pending.split(",") if key.strip()
         )
+
+    @property
+    def paused_providers_set(self) -> frozenset[str]:
+        """Provider service ids this deployment has paused."""
+        return frozenset(
+            key.strip().lower() for key in self.paused_providers.split(",") if key.strip()
+        )
+
+    def paused_provider_message(self, service: str, display_name: str) -> str:
+        """What a caller or a user is told about a paused provider."""
+        if self.paused_provider_messages.strip():
+            custom = json.loads(self.paused_provider_messages).get(service)
+            if custom:
+                return custom.strip()
+        return (f"{display_name} is temporarily paused on treg. Your existing connection is saved "
+                "and starts to work again when it is resumed. No action is needed from you.")
 
     @property
     def expose_dev_code(self) -> bool:

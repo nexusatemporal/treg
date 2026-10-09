@@ -412,6 +412,9 @@ Money notes for agents:
   when known and `alternatives` — other providers for the same capability; pick one, or use
   your own key for the provider (never affected). treg does not switch providers for you.
   treg re-checks the provider about once a minute, so a retry after a minute can succeed.
+- HTTP **503** with `error: provider_paused` → this treg deployment has paused that provider
+  (nothing charged, nothing sent to it). The `message` says why. Its endpoints are out of search
+  and the team's existing connection is kept; do not reconnect, it works again when resumed.
 - `treg balance` shows the prepaid balance and recent charges; the dashboard Activity page
   shows the exact settled cost of every call.
 

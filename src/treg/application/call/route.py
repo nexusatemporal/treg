@@ -324,6 +324,9 @@ async def build_plan(ep: dict, identity_given: dict, caller, options: RouteOptio
                       note=(f"direct account exhausted; overflow via {overflow_route.aggregator}"
                             if overflow_route is not None else ""),
                       ignored=ignored_filters(ad, contract, identity))
+        if catalog_store.paused(e):
+            dropped.append({"endpoint_id": e["id"], "why": f"{e['provider']} is paused on this deployment"})
+            continue
         if tier == "platform" and not cat.platform_eligible(e):
             dropped.append({"endpoint_id": e["id"], "why": "not platform-eligible and no own key"})
             continue

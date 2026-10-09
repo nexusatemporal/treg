@@ -198,6 +198,11 @@ Cron job's workload. Configure it in a private local `.env` or the hosting servi
   credentials make that provider unconfigured instead of failing halfway through consent.
 - `oauth_review_pending` is a comma-separated set of provider-registry review keys. Its hosted value
   is operational state and is maintained privately.
+- `paused_providers` is a comma-separated set of provider service ids this deployment cannot serve
+  right now, for example because its own app lost upstream access. Empty (the default) pauses
+  nothing. `paused_provider_messages` is an optional JSON object `{service: message}`; malformed
+  JSON fails at boot. Removing an id restores the provider with no reconnect. Its hosted value is
+  operational state and is maintained privately. See `interface/api.md` § `503 provider_paused`.
 - `promo_grant_micro` controls the once-per-verified-user signup grant. Zero pauses new automatic
   grants without changing existing balances.
 - `blocked_email_domains` is the complete comma-separated blocklist. Empty blocks no domains. It is

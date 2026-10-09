@@ -56,6 +56,17 @@ def browsable(ep: dict) -> bool:
     "treg", which the brand rules say must never appear as a vendor."""
     return ep["kind"] not in HIDDEN_KINDS and ep.get("kind") != "routed"
 
+def paused_providers() -> frozenset[str]:
+    from ...config import get_settings
+    return get_settings().paused_providers_set
+
+
+def paused(ep: dict) -> bool:
+    """The endpoint's provider is paused on this deployment (TREG_PAUSED_PROVIDERS): out of every
+    search and find answer, while `by_id` keeps it so a direct lookup can say why."""
+    return ep.get("provider", "") in paused_providers()
+
+
 # How much the recorded PRICE is worth as evidence (cost.confidence). It is a claim about the
 # price, not about the endpoint: `verified: 2026-07-28` says the route answered, `confidence:
 # verified` says the money figure was confirmed against something re-checkable.
@@ -1174,6 +1185,8 @@ def _match(query: str, cat: Catalog):
     # platform token matches: same-pattern rows still sum identical floats, ties survive.
     boost = [2 if tok in cat.platforms else 1 for tok in tokens]
     rows = _search_fields(cat)
+    if hidden := paused_providers():
+        rows = [row for row in rows if row[0]["provider"] not in hidden]
     total = len(rows)
     best: list[list[int]] = []
     df = [0] * len(tokens)
@@ -1437,7 +1450,7 @@ def added_rows(query: str, cat: Catalog, opts: AddedOptions) -> tuple[list[tuple
     if query.strip():
         rows, total = search(query, cat, len(cat.endpoints), keep=keep)
     else:
-        rows = [(ep, 0.0) for ep in cat.endpoints if keep(ep)]
+        rows = [(ep, 0.0) for ep in cat.endpoints if keep(ep) and not paused(ep)]
         total = len(rows)
     return (newest_first(rows) if opts.newest or not query.strip() else rows), total
 
