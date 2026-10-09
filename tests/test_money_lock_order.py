@@ -266,21 +266,22 @@ async def test_deferred_failure_rolls_back_every_child_and_can_be_retried(postgr
         await db.commit()
     updates = 0
 
-    def fail_after_second_archive_mark(conn, cursor, statement, parameters, context, executemany):
+    def fail_after_archive_write(conn, cursor, statement, parameters, context, executemany):
         nonlocal updates
-        if statement.lstrip().upper().startswith("UPDATE ARCHIVEKEYORG "):
+        sql = statement.lstrip().upper()
+        if sql.startswith(("UPDATE ARCHIVEKEYORG ", "INSERT INTO ARCHIVEKEYORG ")):
             updates += 1
-            if updates == 2:
+            if updates == 1:
                 # A real PostgreSQL transaction error after money SQL has executed. The whole
-                # batch, including the earlier refund, must roll back rather than partly commit.
+                # batch, including its refund and archive write, must roll back together.
                 conn.exec_driver_sql("SELECT 1 / 0")
 
-    event.listen(postgres_money.sync_engine, "after_cursor_execute", fail_after_second_archive_mark)
+    event.listen(postgres_money.sync_engine, "after_cursor_execute", fail_after_archive_write)
     try:
         assert await close_deferred(list(items), charge=True) == 0
     finally:
-        event.remove(postgres_money.sync_engine, "after_cursor_execute", fail_after_second_archive_mark)
-    assert updates == 2
+        event.remove(postgres_money.sync_engine, "after_cursor_execute", fail_after_archive_write)
+    assert updates == 1, "the injected database failure must have been reached"
     async with session_maker() as db:
         assert await ledger.balance_of(db, org_id) == 700
         assert sum(block.remaining_micro for block in await ledger.blocks_of(db, org_id)) == 1_000
@@ -552,7 +553,7 @@ async def test_zero_cost_batches_record_archive_use_in_compatible_order(postgres
         ], charge=True)
 
     results = await _contend_after_statement(
-        postgres_money, first_batch, second_batch, "UPDATE ARCHIVEKEYORG ")
+        postgres_money, first_batch, second_batch, "INSERT INTO ARCHIVEKEYORG ")
     assert results == [0, 0], results
     await _assert_accounting(org_id, balance=1_000, spent=0)
     async with session_maker() as db:

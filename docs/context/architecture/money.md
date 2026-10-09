@@ -47,6 +47,7 @@ sources:
   - tests/test_money_admission.py
   - tests/test_money_admission_application.py
   - tests/test_money_admission_postgres.py
+  - tests/test_archive_batch_postgres.py
   - scripts/bench_money_admission.py
   - tests/test_marketplace_call.py
   - tests/test_asynctasks.py
@@ -241,9 +242,12 @@ block in reverse order. Duplicate Hold IDs keep the first operation and later oc
 zero, just as repeated conditional claims did. The caller still owns the one commit or rollback;
 enter this helper before other money writes in the transaction.
 
-`close_deferred` uses that helper, then writes archive-use marks in `(org_id, key_hash)` order in
-the same transaction. Repeated marks still each increment the usage counter. Mark ordering also
-matters for zero-cost batches, which may acquire neither block nor balance locks. Cancellation
+`close_deferred` uses that helper, then passes its archive-use marks together to
+`archive.note_org_uses_in_transaction`. The writer combines repeated keys and performs bounded
+upserts in `(org_id, key_hash)` order in the same transaction, reducing database round trips
+after balance locks have been acquired. Every repeated mark still increments the usage counter;
+failure in any chunk rolls back the charges and all marks. Mark ordering also matters for
+zero-cost batches, which may acquire neither block nor balance locks. Cancellation
 compensation closes the parent and overflow holds through the same batch helper.
 
 Hub payments consume the payer's blocks before balance writes. If both payer and payee need a
