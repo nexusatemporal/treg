@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 import json
@@ -20,7 +21,7 @@ from .. import reconcile
 from ..application import evidence_retention
 from ..config import get_settings
 from ..infra import kv
-from ..infra.db import get_admin_session
+from ..infra.db import get_admin_read_session, get_admin_session
 from ..domain import money
 from ..models import ArchiveEndpointStat, ArchiveKey, ArchiveSnapshot, Bundle, CallRecord, EndpointDayStat, LedgerEntry, Membership, Org, Referral, Secret, Tool, User
 from ..timeutil import as_naive as _as_naive
@@ -278,13 +279,14 @@ async def admin_calls(
 
 _ERROR_EVIDENCE_TTL_DAYS = evidence_retention.ERROR_EVIDENCE_TTL_DAYS
 _ERROR_EVIDENCE_EXPIRED = evidence_retention.ERROR_EVIDENCE_EXPIRED
+_ADMIN_ERRORS_TIMEOUT_S = 10
 
 
 @app.get("/admin/errors")
 async def admin_errors(
     days: int = 7, limit: int = 100, provider: str | None = None, status: int | None = None,
     tier: str | None = None,
-    _: str = Depends(require_superadmin), db: AsyncSession = Depends(get_admin_session),
+    _: str = Depends(require_superadmin), db: AsyncSession = Depends(get_admin_read_session),
 ) -> dict:
     """Failed calls with the evidence to explain them — the caller's request and the provider's own
     answer (see models.CallRecord.error_request).
@@ -295,6 +297,8 @@ async def admin_errors(
     Read-only. Ageing is the `treg-worker admin purge-evidence` cron's job
     (application/evidence_retention.py); until it has run, a row older than the window is shown as
     expired with no evidence, so a late schedule never widens what this view reveals.
+    Evidence and org names may lag when a read database is configured; authorization stays on
+    the primary. A bounded query wait returns 503 instead of retrying on the primary.
     """
     cutoff = evidence_retention.cutoff()
     since = _utcnow_naive() - timedelta(days=max(1, min(days, 90)))
@@ -309,9 +313,13 @@ async def admin_errors(
     if tier is not None:
         q = q.where(CallRecord.credential_tier.is_(None) if tier == ""
                     else CallRecord.credential_tier == tier)
-    rows = (await db.execute(q)).scalars().all()
-    omap = {o.id: o for o in (await db.execute(
-        select(Org).where(Org.id.in_({c.org_id for c in rows if c.org_id is not None})))).scalars().all()}
+    try:
+        async with asyncio.timeout(_ADMIN_ERRORS_TIMEOUT_S):
+            rows = (await db.execute(q)).scalars().all()
+            omap = {o.id: o for o in (await db.execute(
+                select(Org).where(Org.id.in_({c.org_id for c in rows if c.org_id is not None})))).scalars().all()}
+    except TimeoutError as exc:
+        raise HTTPException(503, "admin error query timed out") from exc
     return {
         "since": since.isoformat(), "days": days, "retention_days": _ERROR_EVIDENCE_TTL_DAYS,
         "errors": [{
