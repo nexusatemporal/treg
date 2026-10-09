@@ -178,6 +178,14 @@ These connection settings guard accidental writes; they are not an authorization
 be disabled by deliberate SQL. Use a physical replica/read-only database role or filesystem access
 controls as appropriate. Connection/query failures propagate without primary fallback.
 
+`/admin/errors` uses this datasource for evidence and org names. Authorization stays on the admin
+primary pool and releases its connection before the report begins. With no read URL configured,
+`get_admin_read_session` preserves the original admin pool rather than using the general reader's
+API-pool fallback. Configured reader failures never retry on the primary.
+Before enabling a hosted cutover, verify the running process has the intended read URL, the target
+is a readable replica with the required table grants, and replication lag is acceptable. Configuring
+a URL does not migrate any other report. Removing it returns this report to the admin primary pool.
+
 `pool_snapshot()` includes a separate `read` entry for a configured PostgreSQL datasource; SQLite
 engines are omitted as for the primary. `connection_budget()` describes only the primary pools;
 budget the read pool against its target database, including process count and deployment overlap.
@@ -185,8 +193,8 @@ If both URLs target the same server, add both budgets against that server's limi
 `dispose_engine()` also disposes the read engine. Schema upgrades, startup verification and test
 schema resets continue to target the primary.
 
-This datasource is opt-in infrastructure: no application query or worker currently uses it.
-Adopting callers must tolerate replica lag and keep writes, cursor advancement and concurrency
+This datasource is opt-in infrastructure; `/admin/errors` is its first report consumer.
+Further callers must tolerate replica lag and keep writes, cursor advancement and concurrency
 control on the primary. Operators must provision and synchronize a compatible schema and data;
 setting a URL does not establish replication, translate dialect-specific queries, or migrate any
 Cron job's workload. Configure it in a private local `.env` or the hosting service's environment;

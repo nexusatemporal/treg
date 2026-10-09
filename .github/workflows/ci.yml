@@ -153,6 +153,7 @@ jobs:
           tests/test_api_keys.py
           tests/test_postgres_reset.py
           tests/test_read_replica.py
+          tests/test_admin_errors_replica.py
           tests/test_marketplace_call.py
           tests/test_capacity_overflow_spend.py
           tests/test_billing.py

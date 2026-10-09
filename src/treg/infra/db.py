@@ -380,7 +380,18 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 async def get_admin_session() -> AsyncIterator[AsyncSession]:
     """The `/admin/*` dependency. A separate callable, not a flag, because FastAPI caches a
-    dependency per request by identity: the admin gate and the handler it guards must name the SAME
-    one, or one admin request checks out a connection from each of two pools."""
+    dependency per request by identity. Primary handlers share it with the admin gate; opted-in
+    reports use `get_admin_read_session` after the gate releases its primary transaction."""
     async with admin_session_maker() as session:
+        yield session
+
+
+async def get_admin_read_session() -> AsyncIterator[AsyncSession]:
+    """Opt-in admin reports: configured reader, otherwise the original admin primary pool.
+
+    Never use the general reader's unconfigured API-pool fallback, or retry a failed replica on
+    the primary. Authorization must finish on `get_admin_session` before this dependency runs.
+    """
+    maker = read_session_maker if _read_db_url else admin_session_maker
+    async with maker() as session:
         yield session

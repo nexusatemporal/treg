@@ -256,9 +256,11 @@ with the names of the colliding usable tools and the explicit `/call/<name>/<pat
 Each successful identity dependency commits its read-only transaction before the handler runs, so an
 application use case can open its own session without waiting behind the request's pool slot. The
 dependency-cached session remains usable because every session maker sets `expire_on_commit=False`.
-`require_superadmin` is the one gate on a different pool - it takes `get_admin_session`, and so must
-every `/admin/*` handler under it (FastAPI caches dependencies by identity; see
-[super-admin](../architecture/super-admin.md)).
+`require_superadmin` stays on the admin primary pool through `get_admin_session`, shared with
+primary admin handlers. `/admin/errors` uses `get_admin_read_session` for evidence and org names
+after the gate releases its connection: a configured reader, otherwise the original admin pool.
+It accepts replication lag for the report, never for authorization, and never retries a failed
+reader on the primary (see [super-admin](../architecture/super-admin.md)).
 Authz = org scoping + a role gate: `_can_manage` lets admin/owner manage any org resource, a member only
 what they created; `_require_admin_of` gates the org-admin endpoints. See
 [multi-tenancy](../architecture/multi-tenancy.md).
