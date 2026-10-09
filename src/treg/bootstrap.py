@@ -22,7 +22,7 @@ from starlette.routing import BaseRoute, Mount
 
 from . import adsconv, analytics, archive, audit
 from .application.call import route as routed_call
-from .application import arena, find_index
+from .application import archive_erasure, arena, find_index
 from .application.onboard import first_run
 from . import bootstrap_handlers
 from .bootstrap_http import (
@@ -678,6 +678,12 @@ def _lifespan(role: AppRole):
                 if ROLE_BACKGROUND_TASKS[role] and archive.prune_enabled()
                 else None
             )
+            # The erasure sweep (archive.md, "Opting out"): removes what an opted-out team stored.
+            erasure_task = (
+                asyncio.create_task(archive_erasure.sweep_worker())
+                if ROLE_BACKGROUND_TASKS[role] and archive_erasure.worker_enabled()
+                else None
+            )
             # Find's card vectors (docs/context/architecture/find.md): built now, in the background,
             # instead of by the first find after a deploy; off without an embedding key.
             find_task = asyncio.create_task(find_index.warm()) if find_index.enabled() else None
@@ -700,7 +706,7 @@ def _lifespan(role: AppRole):
             finally:
                 try:
                     workers = [task for task in (
-                        gauge_task, ads_task, archive_task, prune_task, find_task,
+                        gauge_task, ads_task, archive_task, prune_task, erasure_task, find_task,
                     ) if task is not None]
                     for task in workers:
                         task.cancel()

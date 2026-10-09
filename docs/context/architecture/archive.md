@@ -26,6 +26,9 @@ sources:
   - src/treg/bootstrap.py
   - src/treg/routers/admin.py
   - src/treg/application/asynctasks.py
+  - src/treg/application/archive_erasure.py
+  - src/treg/alembic/versions/0067_org_archive_opt_out.py
+  - tests/test_archive_opt_out.py
 related:
   - architecture/data-model.md
   - architecture/proxy-model.md
@@ -112,6 +115,51 @@ header, refuses any value but `public`, and refuses it on an `own_account` endpo
 this endpoint's answer is identical whoever asks — treg's own service OAuth reading public data
 is the intended case — and it is judged per endpoint, never inherited from a provider's licence.
 Nothing in the shipped catalog declares it yet.
+
+### Opting out: a team that wants nothing stored
+
+A team admin can take the team out of the archive (`PATCH /orgs/{id}/settings {"archive":
+false}`, `treg org archive off`, the Team page). The setting is `Org.archive_opt_out_at`
+(migration 0067): a timestamp, not a flag, because the moment the team objected is the
+processing record a data-protection request asks for. It is carried onto the call runtime's
+`OrgSnapshot`, so the gate costs no query.
+
+The gate is a full bypass, on every tier: `_execute_call` makes no lookup and no recording for
+an opted-out team, metered or own key, so no key hash reaches the settle and no `ArchiveKeyOrg`
+mark is written. The team is never served a public answer either, even though serving one would
+store nothing of theirs: a hit touches the key's demand and marks the team against the question,
+and the simplest promise is "we do not record what you asked". The cost is the team's: every call
+is live at the live price, no free own-key hit, no repeat price. `cache_outcome` on
+`tool_called` reads `org_opt_out`.
+
+What the team had stored is erased by a sweep (`application/archive_erasure.py`), not by the
+settings request: rows go in bounded transactions and object deletes run with no connection held
+(non-negotiable 3), so the request only records the objection and pokes the worker. The sweep
+(`archive_erasure.sweep_worker`, a lifespan task where background tasks run, one background pool
+slot, `archive_erasure_interval_s`; `treg-worker admin erase-archive` runs one pass by hand)
+takes every team with `archive_opt_out_at` set and `archive_purged_at` NULL, and marks
+`archive_purged_at` when its erasure finished. The settings read reports that as
+`archive_erasure: pending | done`. What "the team's" means is decided by the governance domain
+(`teams.private_archive_key_ids`, `teams.erase_archive_rows`): every key under the team's own
+`org:`/`conn:` scopes, with its snapshots and the request shape the key row carries, plus every
+`ArchiveKeyOrg` mark of the team. A platform-key answer is a public question and stays; once the
+marks are gone nothing in the archive names the team. Objects go before rows, per batch:
+`teams.archive_bodies_only_under` judges which content hashes no other key's snapshot shares (a
+body is content-addressed and deduplicated across keys), those objects are deleted through the
+store's one `delete`, and only then are the rows deleted. A failed object delete stops the pass
+before the rows, so the next pass retries from them; a deleted row would have left its object
+behind for good. The endpoint running totals move with the rows. Opting back in clears both
+timestamps; nothing erased comes back, and a team that opted back in before the sweep reached it
+is left unmarked (what it records from now on is not what was erased).
+
+Deleting a team runs the same erasure: the owner route calls `erase_org` after its request
+session has let go of its connection and before the cascade, so a failure keeps the team for a
+retry; `cascade_delete_org` itself deletes the rows (the archive keys no foreign key at the team,
+so the cascade's FK-walking guard test never sees them), which keeps every other deletion path
+(admin force-delete, the sandbox reaper, the demo reset) from leaving rows behind, at the price of
+objects those paths do not clear. Out of scope, deliberately: the terminal evidence of async tasks
+(`treg://asynctasks/<call_id>`, settlement evidence under a public key), the `callrecord` audit
+trail and the idempotency replay store, which is the caller's own request and has its own window.
 
 ## Pricing a hit
 

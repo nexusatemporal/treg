@@ -8,6 +8,7 @@
     treg-worker catalog stats [--max-rows 500000]    # fold new audit rows into per-day endpoint stats
     treg-worker jev xboost [--posts 60] [--min-likes 150]   # the /jev launch-radar demo: X posts <24h -> jev
     treg-worker admin purge-evidence [--batch-size 5000]  # blank expired error evidence past 14-day retention
+    treg-worker admin erase-archive                        # erase what opted-out teams stored in the archive
 
 Not the light `treg` CLI: these need the server extra (DB, platform keys in the env) and make
 outbound calls to third parties, so they run as Render cron jobs with the server's env — never as
@@ -366,6 +367,19 @@ async def _admin_purge_evidence(args) -> int:
     return 1 if result.get("error") else 0
 
 
+async def _admin_erase_archive(args) -> int:
+    """One erasure sweep (application/archive_erasure): every opted-out team not yet purged."""
+    from . import bootstrap
+    from .application import archive_erasure
+    from .infra.db import verify_db
+
+    await verify_db()
+    async with bootstrap.archive_object_store():
+        done = await archive_erasure.sweep_once()
+    print(json.dumps({"purged_orgs": done}, sort_keys=True))
+    return 0
+
+
 def _positive_int(value: str) -> int:
     n = int(value)
     if n < 1:
@@ -439,6 +453,8 @@ def main(argv: list[str] | None = None) -> int:
     purge.add_argument("--batch-size", type=_positive_int, default=5000,
                        help="rows to update per transaction (default 5000)")
     purge.set_defaults(fn=_admin_purge_evidence)
+    erase = adminsub.add_parser("erase-archive", help="erase what opted-out teams stored in the archive")
+    erase.set_defaults(fn=_admin_erase_archive)
     args = ap.parse_args(argv)
     _need_server()
     return asyncio.run(args.fn(args))

@@ -152,7 +152,9 @@ Notes:
   fresh: verbatim provider bytes, `X-Treg-Cache: hit`, `X-Treg-Fetched-At`, `X-Treg-Age`. Your
   team's first call on a question costs full price either way; from your second call on, a hit
   costs 10%, and a hit on your own key is free. `Cache-Control: no-cache` forces a live call;
-  `X-Treg-Max-Age: <seconds>` accepts only a younger answer.
+  `X-Treg-Max-Age: <seconds>` accepts only a younger answer. A team admin can opt the team out
+  (`treg org archive off`, or the Team page): then no call is answered from or recorded into the
+  archive, every call is live at full price, and what the team had stored is erased.
 - HTTP **503** `provider_capacity_unavailable` = treg's own account for that provider is out
   (not your balance; nothing charged). Body has `resets_at` and `alternatives` (same capability,
   other providers) — choose one, or use your own key. treg never switches providers for you.

@@ -238,6 +238,11 @@ treg-owned aggregator account — same request, same response shape, the relay's
 `X-Treg-Served-Via: overflow:<name>` on the response. `treg org overflow off` opts your team out (calls
 then get the 503 above); `treg org overflow` shows the setting. Own keys are never relayed.
 
+`treg org archive off` takes your team out of treg's archive of answers: no call of yours is answered
+from a stored answer or recorded into one, every call reaches the provider at the live price (no
+free or repeat-priced hits), and what the team had stored is erased. `treg org archive` shows the
+setting and whether that erasure is still pending; `treg org archive on` opts back in.
+
 ### Routed endpoints — let treg choose the provider
 
 `treg.<capability>` endpoints (today `treg.people.email.find`) are generated from the providers of one

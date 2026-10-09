@@ -77,6 +77,9 @@ EXPECTED_MAKERS: dict[str, set[str]] = {
     "application/evidence_retention.py": {API},
     # Off-request writers.
     "audit.py": {BACKGROUND},
+    # The archive erasure sweep (archive.md, "Opting out"): a lifespan worker, and the one-off
+    # erase_org the owner delete route runs after its request session let go of its connection.
+    "application/archive_erasure.py": {BACKGROUND},
     "bootstrap.py": {BACKGROUND},
     # `lookup` is on the API pool inside a caller's /call/; every write here is background.
     "archive.py": {API, BACKGROUND},
@@ -188,6 +191,8 @@ BACKGROUND_SITES = {
     "archive_bodies.py:_db_fallback": "archive._store/_touch",
     "archive.py:prune_once": "archive.prune_worker",
     "archive.py:refresh_once": "archive.refresh_worker",
+    "application/archive_erasure.py:erase_org": "archive.erasure_worker",
+    "application/archive_erasure.py:sweep_once": "archive.erasure_worker",
 }
 
 

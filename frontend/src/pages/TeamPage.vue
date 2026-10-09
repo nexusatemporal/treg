@@ -508,6 +508,30 @@ export default {
                   </p>
                 </div>
 
+                <!-- THE ARCHIVE. A team-level privacy setting (docs/context/architecture/archive.md,
+                     "Opting out"): off means no call is answered from or recorded into treg's archive
+                     and what the team stored is erased. The erasure runs in the background, so the
+                     reply says whether it is still pending. -->
+                <div v-if="capCfg" style="margin-top:22px;border-top:1px solid var(--line);padding-top:14px">
+                  <span class="lbl" style="margin:0">Archive</span>
+                  <p class="sub" style="margin:4px 0 8px;font-size:12px">
+                    treg keeps answers to the exact questions your agents ask so a repeat can be served
+                    from storage: free on your own keys, at a reduced price on treg's. Turn it off and
+                    every call goes to the provider live at the full price, nothing of yours is stored,
+                    and what was stored for this team is erased.
+                  </p>
+                  <div class="field" style="max-width:560px;align-items:center">
+                    <label class="tgl" :title="capCfg.archive?'archive on — click to opt out and erase':'archive off — click to opt back in'">
+                      <input type="checkbox" :checked="capCfg.archive" :disabled="archiveBusy" @change="setArchive($event.target.checked)"/>
+                      <span>{{capCfg.archive?'on':'off'}}</span>
+                    </label>
+                    <span v-if="!capCfg.archive" class="sub" style="margin:0">
+                      erasure of what this team had stored: <b>{{capCfg.archive_erasure==='done'?'done':'pending'}}</b>
+                    </span>
+                  </div>
+                  <p v-if="archiveErr" class="banner" style="margin:10px 0 0">{{archiveErr}}</p>
+                </div>
+
                 <!-- PER-TAG BUDGETS. What a team reselling treg sets on ITS OWN customers. Only
                      DECLARED dimensions are enforced on the call path, so the key is a picker over
                      those rather than a free-text box — the API refuses a limit on anything else
