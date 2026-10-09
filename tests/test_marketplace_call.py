@@ -3272,6 +3272,15 @@ async def test_parallel_platform_call_settles_its_reported_usage_skus(
      {"results": [{"url": "https://example.com", "excerpts": [], "full_content": None},
                   {"url": "https://example.org", "excerpts": ["Example"], "full_content": None}],
       "usage": [{"name": "sku_extract_excerpts", "count": 1}]}, 1_000),
+    # Two empty pages with an explicitly empty usage[]: Parallel billed nothing, so neither does treg.
+    ("parallel.web.extract", {"urls": ["https://example.com", "https://example.org"]},
+     {"results": [{"url": "https://example.com", "excerpts": [], "full_content": None},
+                  {"url": "https://example.org", "excerpts": [], "full_content": None}],
+      "usage": []}, 0),
+    # The same pages with no usage field at all are unobserved: the base-price fallback settles.
+    ("parallel.web.extract", {"urls": ["https://example.com", "https://example.org"]},
+     {"results": [{"url": "https://example.com", "excerpts": [], "full_content": None},
+                  {"url": "https://example.org", "excerpts": [], "full_content": None}]}, 1_000),
     # A successful answer without usage[] settles the base price the row holds, never more.
     ("parallel.web.search", {"search_queries": ["x"], "mode": "fast"},
      {"results": [{"url": "https://example.com", "excerpts": ["Example"]}]}, 1_000),

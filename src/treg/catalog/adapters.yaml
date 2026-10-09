@@ -2997,8 +2997,9 @@ adapters:
     test_identity: {url: "https://example.com"}
     const: {body.advanced_settings.full_content: true}
     out: {pages: results, count: "len(results)"}
-    # One page decides alone; with several, any page may have text and usage[] settles them.
-    miss: "choose(results[1] == null, coalesce(results[0].full_content, results[0].excerpts, '') == '', false)"
+    # One page decides alone. With several, an explicitly empty usage[] is the free miss; an
+    # absent usage field is unobserved and keeps the base-price fallback.
+    miss: "choose(results[1] == null, coalesce(results[0].full_content, results[0].excerpts, '') == '', usage == [])"
   olostep.web.scrape:
     accepts: [[url]]
     in: {url: body.url_to_scrape}

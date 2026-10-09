@@ -210,6 +210,10 @@ def test_parallel_adapters_are_routed_and_an_excerpt_only_page_is_a_hit():
     # A multi-URL call is never judged by its first page: a later page may have text.
     assert not extract.is_miss({"results": [{"url": "a", "excerpts": [], "full_content": None},
                                             {"url": "b", "excerpts": ["text"], "full_content": "text"}]})
+    # With several pages, an explicitly empty usage[] is the miss; an absent one is unobserved.
+    empty = {"url": "a", "excerpts": [], "full_content": None}
+    assert extract.is_miss({"results": [empty, empty], "usage": []})
+    assert not extract.is_miss({"results": [empty, empty]})
 
 
 def test_search_adapter_does_not_treat_an_answer_without_results_as_a_miss():
