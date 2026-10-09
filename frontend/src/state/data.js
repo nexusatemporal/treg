@@ -87,7 +87,6 @@ export default function data(){
       verdictKinds:['useful','partly','not_useful'],   // an endpoint's agent verdicts, in bar order
       platCap:null,        // the compared capability a platform URL names, by its key (`compare`)
       drawerTool:null,       // endpoint id open in the tool drawer
-      catalogArm:'',         // the catalog-v2 arm this load was dealt (state/catalogExperiment.js)
       epInfo:{},         // endpoint id → {loading, data} from /catalog/endpoints/<id>
       platComparisonLead:null,    // the endpoint whose detail carries the open comparison's siblings and plan
       platComparisonSort:{key:'price', dir:'asc'},   // the comparison's order (DataTable v-model:sort)

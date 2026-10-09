@@ -1,6 +1,6 @@
 <script>
 import controller from './state/controller.js'
-import { pages, dialogs, LegacyPlatformPage } from './views'
+import { pages, dialogs } from './views'
 import SignedOutPage from './components/SignedOutPage.vue'
 import BrandMark from './components/BrandMark.vue'
 import PublicNavigation from './components/PublicNavigation.vue'
@@ -13,7 +13,7 @@ const {
   detail: DetailPage, secrets: SecretsPage, resources: TeamResourcesPage, orgs: TeamPage, activity: ActivityPage,
   admin: AdminPage, start: GettingStartedPage, referrals: ReferralsPage, hub: HubPage, run: HubRunPage, help: HelpPage,
 } = pages
-export default { ...controller, components: { ...controller.components, ...dialogs, TeamResourcesPage, CatalogPage, ConnectionsPage, ProviderPage, PlatformPage, LegacyPlatformPage, ToolsPage, DetailPage, SecretsPage, TeamPage, ActivityPage, AdminPage, GettingStartedPage, ReferralsPage, HelpPage, SearchPage, HubPage, HubRunPage, SignedOutPage, BrandMark, PublicNavigation, LandingNavigation, DashboardNavigation, SignInDialog } }
+export default { ...controller, components: { ...controller.components, ...dialogs, TeamResourcesPage, CatalogPage, ConnectionsPage, ProviderPage, PlatformPage, ToolsPage, DetailPage, SecretsPage, TeamPage, ActivityPage, AdminPage, GettingStartedPage, ReferralsPage, HelpPage, SearchPage, HubPage, HubRunPage, SignedOutPage, BrandMark, PublicNavigation, LandingNavigation, DashboardNavigation, SignInDialog } }
 </script>
 
 <template>
@@ -68,8 +68,7 @@ export default { ...controller, components: { ...controller.components, ...dialo
         <ProviderPage v-if="view==='provider' && (mkProvider || mkPaused)" />
 
         <!-- MARKETPLACE: one platform, from the endpoint catalog -->
-        <LegacyPlatformPage v-if="view==='platform' && catalogLegacy" />
-        <PlatformPage v-else-if="view==='platform'" />
+        <PlatformPage v-if="view==='platform'" />
 
         <ToolsPage v-if="view==='tools'" />
 
