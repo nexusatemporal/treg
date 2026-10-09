@@ -288,6 +288,7 @@ contracts:
       count: {type: int}
     miss: "results == []"
     idempotent: true
+    prefer: [crawl4ai]
 
   people.search:
     summary: "Find people by a free-text description, or by company domain / title / country — provider-native rows in `people`"

@@ -2735,6 +2735,12 @@ adapters:
           followers: output.data.followerCount, connections: output.data.connectionsCount,
           about: output.data.about, linkedin_url: output.data.url}
     miss: "output.found == false"
+  crawl4ai.google.serp.organic:
+    accepts: [[q]]
+    in: {q: queryParams.q}
+    in_expr: {queryParams.country: "lower(country)", queryParams.language: "lower(language)", queryParams.num: "at_most(ceil_to(limit, 10), 100)"}
+    out: {results: results, count: "len(results)"}
+    miss: "coalesce(results, []) == []"
   anyapi.google.serp.organic:
     accepts: [[q]]
     in:  {q: body.query}

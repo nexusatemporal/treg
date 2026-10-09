@@ -277,6 +277,44 @@ endpoints:
     docs_url: https://crawl4ai.com/llms.txt
     example_response: examples/crawl4ai.google.serp.ai_mode.json
 
+  - id: crawl4ai.google.serp.organic
+    async: false
+    capability: google.serp.organic
+    platform: google
+    domain: serp
+    scope: any_account
+    method: GET
+    path: /serp
+    name: "Google organic results with true rank and page blocks"
+    summary: "One Google results page as JSON: every organic result with its rank (position, and position_absolute counting the blocks above it), and each block Google showed (AI Overview, People also ask, local pack, videos, ...). Localised to a country, a language and optionally a city. When results is empty, empty_reason says why: google_no_results (Google matched nothing) or rescue_no_results (another provider may still have results)."
+    strict_query: true
+    input:
+      queryParams:
+        q: {type: string, required: true, note: "the query, up to 512 characters", example: "best crm software"}
+        country: {type: string, required: false, note: "two-letter Google country (gl), default us"}
+        language: {type: string, required: false, note: "Google interface language (hl), e.g. en or pt-br; default en"}
+        location: {type: string, required: false, note: "a city or region, e.g. Austin, TX; an unknown place answers 400 with the closest names"}
+        num: {type: integer, required: false, note: "results to return: a multiple of 10 from 10 to 100 (num/10 Google pages); default 10"}
+        page: {type: integer, required: false, note: "page over num, 1 to 30: num=10&page=2 is results 11-20"}
+        time: {type: string, required: false, enum: [hour, day, week, month, year], note: "Google's time filter"}
+        fresh: {type: string, required: false, enum: ["1"], note: "1 skips the cache"}
+    test_request: {queryParams: {q: "best crm software", country: us}}
+    cost:
+      type: per_success
+      value: 0.15
+      currency: credit
+      per: 1
+      unit: page
+      source: observed
+      source_url: https://api.crawl4ai.com/v1/prices
+      checked: '2026-10-09'
+      confidence: verified
+      note: "treg's account price: 0.15 credits per Google page of 10 results, so num=30 costs 0.45; a 4xx or 5xx is free. The hold is one page; the x-c4-cost header settles the actual charge (0.150 for num=10 and 0.450 for num=30 observed live 2026-10-09)."
+    verified: '2026-10-09'
+    added: '2026-10-09'
+    docs_url: https://crawl4ai.com/llms.txt
+    example_response: examples/crawl4ai.google.serp.organic.json
+
   # --- Many URLs ---------------------------------------------------------------------------------
   - id: crawl4ai.web.extract.batch
     async: false
