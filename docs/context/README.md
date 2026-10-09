@@ -20,7 +20,7 @@ covers (frontmatter `sources:`). Regenerate this index with
 | [Archive - versioned history and cache admission](architecture/archive.md) | building | archive.py, hunter.yaml, results.py, 0031_archive_result_admission.py, … |
 | [Auth & secrets — injectors, encryption, OAuth freshness, health](architecture/auth-secrets.md) | shipped | injectors.py, ssrf.py, crypto.py, oauth.py, … |
 | [Endpoint catalog — what you can DO with a connected key, and which provider should do it](architecture/catalog.md) | shipped | catalog_added.py, catalog_backfill_added.py, catalog-added.yml, fetchinio.yaml, … |
-| [Application composition and deployment roles](architecture/composition.md) | shipped | bootstrap.py, bootstrap_handlers.py, bootstrap_http.py, call_surface.py, … |
+| [Application composition and deployment roles](architecture/composition.md) | shipped | bootstrap.py, bootstrap_handlers.py, bootstrap_http.py, worker.py, … |
 | [Data model — the registry tables, async DB, audit writer](architecture/data-model.md) | shipped | 0042_pinned_read_scope.py, alembic.ini, env.py, 0001_baseline_current_schema.py, … |
 | [Feedback - private intake for problems and suggestions](architecture/feedback.md) | shipped | feedback_contract.py, __init__.py, reports.py, reviews.py, … |
 | [Find tools for a job - /catalog/find, recall by job and one judge request](architecture/find.md) | building | catalog_find.py, find_recall.py, find_index.py, embed.py, … |

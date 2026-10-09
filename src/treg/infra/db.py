@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from ..config import get_settings
+from . import money_trace
 
 # `expire_on_commit=False` so objects stay usable after commit without a reload round-trip.
 # On a real (non-SQLite) DB, add production pool hygiene: pre-ping to drop dead connections
@@ -156,6 +157,7 @@ def _new_engine(name: str, url: str | None = None):
         # Use a replica/read-only database role as the access boundary, not this session default.
         kwargs["connect_args"] = {"server_settings": {"default_transaction_read_only": "on"}}
     engine = create_async_engine(db_url, **kwargs)
+    money_trace.install_engine(engine.sync_engine, pool_name=name)
     if name == "read" and is_sqlite:
         # Keep this on the dedicated reader even when both URLs name the same SQLite file.
         # Applying it to the shared primary engine would also disable application writes.

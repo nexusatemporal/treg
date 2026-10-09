@@ -373,6 +373,14 @@ def _positive_int(value: str) -> int:
     return n
 
 
+async def _run_command(args) -> int:
+    from .infra.money_trace_runner import money_trace_lifespan
+
+    # In particular, async hold settlement runs here without any web application's lifespan.
+    async with money_trace_lifespan(role="worker"):
+        return await args.fn(args)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="treg-worker", description=__doc__)
     sub = ap.add_subparsers(dest="group", required=True)
@@ -441,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
     purge.set_defaults(fn=_admin_purge_evidence)
     args = ap.parse_args(argv)
     _need_server()
-    return asyncio.run(args.fn(args))
+    return asyncio.run(_run_command(args))
 
 
 if __name__ == "__main__":

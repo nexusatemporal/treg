@@ -251,6 +251,15 @@ write other tables first. During rollout, retire old batch and cross-org writers
 on consistent ordering. Lock ordering removes these circular waits; it does not bound the time
 a slow transaction may hold a lock.
 
+Public money entries attach local transaction identity and stage labels through
+`infra.money_trace`, without extra queries or earlier connection acquisition. Application call
+scopes additionally label preflight and bookkeeping after settlement. Active slow-transaction
+snapshots can correlate a PostgreSQL blocker PID to an open money transaction before it finishes;
+the actual commit/rollback boundary, rather than the public function return, ends the trace.
+See [transaction diagnostics](data-model.md#product-analytics-writer-analyticspy) for coverage,
+bounded logging, worker lifecycle and evidence limitations. Tracing changes neither lock order
+nor accounting behavior.
+
 **Margin is applied inside the module** (`with_margin`), at reserve AND settle, and the rate in force
 is recorded on every entry - so a rate change cannot retroactively rewrite what a call cost, and two
 call sites cannot disagree.

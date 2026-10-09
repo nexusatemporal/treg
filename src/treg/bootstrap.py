@@ -34,6 +34,7 @@ from .bootstrap_http import (
 )
 from .config import TREG_USER_AGENT, get_settings
 from .infra import kv, money_timing
+from .infra.money_trace_runner import start_money_trace, stop_money_trace
 from .infra.db import background_session_maker, verify_db
 from .infra.catalog_observations import (
     CachedEndpointObservationReader,
@@ -682,6 +683,8 @@ def _lifespan(role: AppRole):
                 else None
             )
             gauge_task = asyncio.create_task(pool_gauge()) if analytics.enabled() else None
+            # Local transaction diagnostics run even when the analytics transport is disabled.
+            trace_runner = start_money_trace(role=role)
             # The archive's refresh worker (docs/context/architecture/archive.md): serve mode only,
             # and a zero daily cap disables it without touching serving. Same discipline as the ads
             # task — in-process, cancelled on shutdown, a bad pass never kills the loop.
@@ -739,11 +742,15 @@ def _lifespan(role: AppRole):
                     await archive.drain()
                     if gauge_task is not None:
                         _emit_money_timings()
+                    await stop_money_trace(trace_runner)
                     await analytics.drain()
                     await app.state.http.aclose()
                     await kv.close()
                 finally:
-                    analytics.remove_fault_handler(fault_handler)
+                    try:
+                        await stop_money_trace(trace_runner)
+                    finally:
+                        analytics.remove_fault_handler(fault_handler)
 
     return lifespan
 
