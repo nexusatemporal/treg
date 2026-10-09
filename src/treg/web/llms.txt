@@ -375,10 +375,8 @@ Money notes for agents:
   question costs full price either way; from your second call on, a hit costs 10% - and a hit on
   your own key is free. Send `Cache-Control: no-cache` to force a live call, or `X-Treg-Max-Age:
   <seconds>` to accept only a younger answer. A team admin can opt the whole team out of the
-  archive (`treg org archive off`, `PATCH /orgs/{id}/settings {"archive": false}`): no call of
-  that team is then answered from or recorded into it, every call is live at full price, and
-  the answers stored for the team are erased (call records and async-task completion evidence
-  stay). An idempotency replay is different
+  archive (`treg org archive off`): every call is then live at full price. An idempotency
+  replay is different
   (`X-Treg-Idempotent-Replay: true`). Empty results are the provider's own semantics — treg does
   not normalise "no data" vs "no coverage" vs "unsupported target".
 - Out of balance → HTTP **402** with a machine-actionable body: `balance_micro`,
