@@ -165,7 +165,7 @@ endpoints:
       source_url: https://docs.parallel.ai/getting-started/pricing
       checked: '2026-10-09'
       confidence: documented
-      note: "$0.005 per request with 100 results included. The response reports no usage, so the documented price settles; whether an empty answer is billed was not observed."
+      note: "$0.005 per request with 100 results included, including an empty answer. The response reports no usage, so this price settles. Live: ten empty company searches lowered the account balance by $0.05."
     verified: '2026-10-09'
     added: '2026-10-09'
     example_response: examples/parallel.people.search.json
@@ -198,7 +198,7 @@ endpoints:
       source_url: https://docs.parallel.ai/getting-started/pricing
       checked: '2026-10-09'
       confidence: documented
-      note: "$0.005 per request with 100 results included. The response reports no usage, so the documented price settles; whether an empty answer is billed was not observed."
+      note: "$0.005 per request with 100 results included, including an empty answer. The response reports no usage, so this price settles. Live: ten empty company searches lowered the account balance by $0.05."
     verified: '2026-10-09'
     added: '2026-10-09'
     example_response: examples/parallel.companies.search.json
