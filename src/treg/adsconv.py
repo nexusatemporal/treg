@@ -485,8 +485,8 @@ async def drain_once(db: AsyncSession, client) -> dict:
     orgs = {o.id: o for o in (await db.execute(
         select(Org).where(Org.id.in_(org_ids)))).scalars().all()}
     # The creator's email is resolved at UPLOAD time, not stored on the row: the outbox never
-    # holds an address (hashed or not), and a team whose human creator is later removed simply
-    # uploads without an identifier rather than carrying a stale one.
+    # holds an address (hashed or not). If the creator has left, the earliest remaining human member
+    # is uploaded instead: orgs record no creator id, so this is the closest identifier there is.
     emails = await human_owner_emails(db, org_ids) if user_data_enabled() else {}
     payload, payload_rows = _payload_and_rows(rows, orgs, emails)
     payload_ids = {row.id for row in payload_rows}

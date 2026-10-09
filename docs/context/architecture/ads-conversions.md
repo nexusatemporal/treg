@@ -111,9 +111,12 @@ Google Ads processor row name this exact disclosure), and personalisation is alw
 hash exists for measurement, never for audiences.
 
 The email is resolved at **upload** time (`drain_once` → `human_owner_emails`), never stored on the
-row: the outbox holds no address, hashed or not, and a team whose creator is later removed simply
-uploads without an identifier. A row with neither a click id nor a human creator is dead-lettered
-with `error = "outbox row has no attributable org: no click id and no human creator email"`.
+row: the outbox holds no address, hashed or not. If the creator has left by upload time, the team's
+earliest remaining human member is uploaded instead; a known approximation, since orgs record no
+creator id. A row with neither a click id nor a human member is dead-lettered with
+`error = "outbox row has no attributable org: no click id and no human creator email"`. A row with
+no click id drained while the flag is OFF is parked a day at a time, never dead-lettered, so turning
+the flag back on uploads it.
 
 **Two account-side switches gate the flag**, both UI-only (the API reads them back but cannot set
 them): the Ads account must accept the *Customer Data Terms* and enable *Enhanced conversions for
