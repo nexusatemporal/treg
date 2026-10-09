@@ -1,11 +1,10 @@
 """Failure evidence may lag; authorization and primary pool isolation must not."""
 
-import asyncio
 from datetime import timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, text
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 
@@ -14,7 +13,6 @@ from treg.config import get_settings
 from treg.domain.identity import session as identity_session
 from treg.infra import db as infra_db
 from treg.models import CallRecord, Org, User
-from treg.routers import admin
 from treg.timeutil import utcnow_naive
 
 from test_read_replica import load_database  # noqa: F401 - isolated engine fixture
@@ -134,53 +132,23 @@ async def test_replica_failure_is_not_retried_on_primary(error_client, replica, 
     assert replica._read_engine.pool.checkedout() == 0
 
 
-async def test_slow_error_query_returns_503_and_releases_session(error_client, replica, monkeypatch):
-    original_execute = replica.read_session_maker.class_.execute
-    cancelled = asyncio.Event()
-
-    async def slow_errors(db, statement, *args, **kwargs):
-        if db.bind is replica._read_engine:
-            try:
-                await asyncio.Future()
-            finally:
-                cancelled.set()
-        return await original_execute(db, statement, *args, **kwargs)
-
-    monkeypatch.setattr(admin, "_ADMIN_ERRORS_TIMEOUT_S", 0.05, raising=False)
-    monkeypatch.setattr(replica.read_session_maker.class_, "execute", slow_errors)
-    response = await asyncio.wait_for(error_client.get("/admin/errors"), timeout=2)
-    assert response.status_code == 503, response.text
-    assert response.json()["detail"] == "admin error query timed out"
-    assert cancelled.is_set()
-    assert replica._read_engine.pool.checkedout() == 0
-
-
 @pytest.mark.skipif(infra_db._is_sqlite, reason="requires isolated PostgreSQL")
-async def test_postgres_timeout_cancels_query_and_releases_both_pools(
+async def test_postgres_report_releases_primary_before_reading(
     error_client, load_database, monkeypatch,
 ):
     replica = load_database(infra_db._db_url, "read.pool_size=1")
     monkeypatch.setattr(infra_db, "_read_db_url", infra_db._db_url)
     monkeypatch.setattr(infra_db, "read_session_maker", replica.read_session_maker)
-    monkeypatch.setattr(admin, "_ADMIN_ERRORS_TIMEOUT_S", 0.2, raising=False)
     connections_held = []
 
-    @event.listens_for(replica._read_engine.sync_engine, "before_cursor_execute", retval=True)
-    def slow_query(conn, cursor, statement, parameters, context, executemany):
-        if "FROM callrecord" in statement:
+    @event.listens_for(replica._read_engine.sync_engine, "before_cursor_execute")
+    def observe_query(conn, cursor, statement, parameters, context, executemany):
+        if "FROM callrecord" in statement or "FROM org" in statement:
             connections_held.append(infra_db._admin_engine.pool.checkedout())
-            return "SELECT pg_sleep(5)", ()
-        return statement, parameters
 
-    response = await asyncio.wait_for(error_client.get("/admin/errors"), timeout=3)
-    assert response.status_code == 503, response.text
-    assert connections_held == [0], "authorization held a primary connection during the report"
+    response = await error_client.get("/admin/errors")
+    assert response.status_code == 200, response.text
+    assert response.json()["errors"][0]["org"] == "primary-team"
+    assert connections_held == [0, 0], "authorization held a primary connection during the report"
     assert replica._read_engine.pool.checkedout() == 0
     assert infra_db._admin_engine.pool.checkedout() == 0
-    event.remove(replica._read_engine.sync_engine, "before_cursor_execute", slow_query)
-    async with replica.read_session_maker() as db:
-        assert await db.scalar(text("SELECT 1")) == 1
-        assert await db.scalar(text(
-            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
-            "AND pid != pg_backend_pid() AND state = 'active' AND query = 'SELECT pg_sleep(5)'"
-        )) == 0

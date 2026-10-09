@@ -179,8 +179,7 @@ controls as appropriate. Connection/query failures propagate without primary fal
 `/admin/errors` uses this datasource for evidence and org names. Authorization stays on the admin
 primary pool and releases its connection before the report begins. With no read URL configured,
 `get_admin_read_session` preserves the original admin pool rather than using the general reader's
-API-pool fallback. The report allows ten seconds for both queries and connection acquisition;
-expiration cancels the query and returns 503. Configured reader failures never retry on the primary.
+API-pool fallback. Configured reader failures never retry on the primary.
 Before enabling a hosted cutover, verify the running process has the intended read URL, the target
 is a readable replica with the required table grants, and replication lag is acceptable. Configuring
 a URL does not migrate any other report. Removing it returns this report to the admin primary pool.

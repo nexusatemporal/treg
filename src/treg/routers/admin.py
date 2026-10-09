@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 import json
@@ -279,7 +278,6 @@ async def admin_calls(
 
 _ERROR_EVIDENCE_TTL_DAYS = evidence_retention.ERROR_EVIDENCE_TTL_DAYS
 _ERROR_EVIDENCE_EXPIRED = evidence_retention.ERROR_EVIDENCE_EXPIRED
-_ADMIN_ERRORS_TIMEOUT_S = 10
 
 
 @app.get("/admin/errors")
@@ -298,7 +296,7 @@ async def admin_errors(
     (application/evidence_retention.py); until it has run, a row older than the window is shown as
     expired with no evidence, so a late schedule never widens what this view reveals.
     Evidence and org names may lag when a read database is configured; authorization stays on
-    the primary. A bounded query wait returns 503 instead of retrying on the primary.
+    the primary.
     """
     cutoff = evidence_retention.cutoff()
     since = _utcnow_naive() - timedelta(days=max(1, min(days, 90)))
@@ -313,13 +311,9 @@ async def admin_errors(
     if tier is not None:
         q = q.where(CallRecord.credential_tier.is_(None) if tier == ""
                     else CallRecord.credential_tier == tier)
-    try:
-        async with asyncio.timeout(_ADMIN_ERRORS_TIMEOUT_S):
-            rows = (await db.execute(q)).scalars().all()
-            omap = {o.id: o for o in (await db.execute(
-                select(Org).where(Org.id.in_({c.org_id for c in rows if c.org_id is not None})))).scalars().all()}
-    except TimeoutError as exc:
-        raise HTTPException(503, "admin error query timed out") from exc
+    rows = (await db.execute(q)).scalars().all()
+    omap = {o.id: o for o in (await db.execute(
+        select(Org).where(Org.id.in_({c.org_id for c in rows if c.org_id is not None})))).scalars().all()}
     return {
         "since": since.isoformat(), "days": days, "retention_days": _ERROR_EVIDENCE_TTL_DAYS,
         "errors": [{

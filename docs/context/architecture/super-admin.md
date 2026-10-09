@@ -67,9 +67,7 @@ endpoints are unaffected (they use `require_superadmin`).
   because the rows hold customers' request content; `GET /calls` deliberately does **not** expose
   these columns, and it defers them so they are not even fetched. The route is read-only: the
   evidence and org-name queries use `get_admin_read_session` and may reflect replication lag.
-  They share a ten-second application timeout, including connection acquisition; expiration
-  cancels the query and returns `503` with detail `admin error query timed out`. The
-  14-day retention purge (blanking both columns to `'<expired>'`) is the `treg-worker admin
+  The 14-day retention purge (blanking both columns to `'<expired>'`) is the `treg-worker admin
   purge-evidence` cron (`application/evidence_retention.py`), in bounded batches. A row past the
   window is listed as `expired` with no evidence even before the cron reaches it.
 - **Reconciliation (Phase 5):** `admin_reconcile_drift|spend|repeats` (`?since_days=30`) — cross-org
