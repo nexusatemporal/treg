@@ -767,6 +767,13 @@ adapters:
     const: {body.category: people}
     out: {people: results, count: "len(results)"}
     miss: "results == []"
+  parallel.people.search:
+    accepts: [[q]]
+    in: {q: body.objective}
+    in_expr: {body.objective: "join(q, csv(keywords))", body.match_limit: "at_least(at_most(limit, 100), 5)"}
+    const: {body.entity_type: people}
+    out: {people: entities, count: "len(entities)"}
+    miss: "coalesce(entities, []) == []"
   icypeas.people.search:
     accepts: [[company_domain, title], [company_domain], [title]]
     in:  {company_domain: body.query.currentCompanyWebsite.include, title: body.query.currentJobTitle.include}
@@ -1107,6 +1114,13 @@ adapters:
     const: {body.category: company}
     out: {companies: results, count: "len(results)"}
     miss: "results == []"
+  parallel.companies.search:
+    accepts: [[q]]
+    in: {q: body.objective}
+    in_expr: {body.match_limit: "at_least(at_most(limit, 100), 5)"}
+    const: {body.entity_type: companies}
+    out: {companies: entities, count: "len(entities)"}
+    miss: "coalesce(entities, []) == []"
   oceanio.companies.search:
     # Domain only: industries take Ocean.io's exact vocabulary (free text is a false miss) and
     # technologies is an object, not a list.
@@ -2926,6 +2940,13 @@ adapters:
     in_expr: {body.count: limit}
     out: {results: data.results, count: "len(data.results)"}
     miss: "coalesce(data.results, []) == []"
+  parallel.web.search:
+    accepts: [[q]]
+    in_expr: {body.search_queries: "list(q)", body.advanced_settings.max_results: "at_most(limit, 20)"}
+    test_identity: {q: "python requests library", limit: 2}
+    const: {body.mode: fast}
+    out: {results: results, count: "len(results)"}
+    miss: "coalesce(results, []) == []"
   crawl4ai.web.search:
     accepts: [[q]]
     in: {q: queryParams.q}
@@ -2970,6 +2991,15 @@ adapters:
     const: {body.text: true}
     out: {pages: results, count: "len(results)"}
     miss: "coalesce(results[0].text, '') == ''"
+  parallel.web.extract:
+    accepts: [[url]]
+    in_expr: {body.urls: "list(url)"}
+    test_identity: {url: "https://example.com"}
+    const: {body.advanced_settings.full_content: true}
+    out: {pages: results, count: "len(results)"}
+    # One page decides alone. With several, an explicitly empty usage[] is the free miss; an
+    # absent usage field is unobserved and keeps the base-price fallback.
+    miss: "choose(results[1] == null, coalesce(results[0].full_content, results[0].excerpts, '') == '', usage == [])"
   olostep.web.scrape:
     accepts: [[url]]
     in: {url: body.url_to_scrape}

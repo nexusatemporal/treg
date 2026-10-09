@@ -310,6 +310,11 @@ receives 401. `TREG_PLATFORM_KEY_OCTEN` supplies the optional shared binding thr
 typed setting; a team's own key remains first and unmetered. No account balance endpoint is
 documented for this credential.
 
+Parallel is an API-key provider with an `x-api-key` binding. Its connection probe reads the free
+`GET /v1/monitors/stats`: a valid key receives 200 and an invalid key 401. Its balance route takes
+an Account API OAuth token, not this key, so it is not the probe. `TREG_PLATFORM_KEY_PARALLEL`
+supplies the optional shared binding; a team's own key remains first and unmetered.
+
 Connecting a provider persists its API `base_url` and indexed `host` on the team's tool. Changing
 the registry's base URL affects new connections and direct catalog calls, but an existing named
 tool or URL-passthrough call keeps using its stored host until reconnect or a scoped data migration.
