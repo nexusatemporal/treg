@@ -537,10 +537,6 @@ class Settings(BaseSettings):
     archive_prune_batch: int = 500             # bodies stripped per pass, the load bound
     archive_prune_keep_versions: int = 2       # newest N bodies kept on servable keys
     archive_prune_min_age_days: int = 7        # servable bodies younger than this are never touched
-    # The erasure sweep (application/archive_erasure.py): erases what an opted-out team stored.
-    # A pass per interval, sooner when the settings route pokes it; 0 disables the worker (the
-    # `treg-worker admin erase-archive` command remains).
-    archive_erasure_interval_s: int = 300
 
     # The tool hub (docs/HUB-DECISIONS.md): tools a maker publishes, made of other tools. Off by
     # default so every merge along the way changes nothing users see; production flips it once

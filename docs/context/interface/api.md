@@ -909,7 +909,7 @@ if returning the hold itself fails, the money comes back when the hold is reaped
 | `GET /orgs/{id}/usage/by-tag?key=&days=` | per-value spend for one tag key. **Money from the ledger**; admin+ |
 | `GET/PUT/DELETE /orgs/{id}/budgets[/{dim}/{val}]` | per-tag limits and blocking; admin+ |
 | `PATCH /orgs/{id}` | (admin+) rename the team: `name` and/or `slug`; the old slug stays an alias so existing keys keep working |
-| `GET/PATCH /orgs/{id}/settings` | the team's daily spend cap, budget dimensions, primary dimension, overflow opt-out and archive opt-out (`archive`; the read adds `archive_erasure: pending` or `done`; architecture/archive.md, "Opting out") |
+| `GET/PATCH /orgs/{id}/settings` | the team's daily spend cap, budget dimensions, primary dimension, overflow opt-out and archive opt-out (`archive`; architecture/archive.md, "Opting out") |
 
 `PUT /orgs/{id}/budgets/{dim}/{val}` is an upsert that leaves unsent fields alone - a PUT that only
 sets `status` does not wipe the caps. Body: `daily_cap_micro`, `monthly_cap_micro`, `calls_per_day`,

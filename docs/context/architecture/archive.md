@@ -130,51 +130,39 @@ mark is written. The team is never served a public answer either, even though se
 store nothing of theirs: a hit touches the key's demand and marks the team against the question,
 and the simplest promise is "we do not record what you asked". The cost is the team's: every call
 is live at the live price, no free own-key hit, no repeat price. `cache_outcome` on
-`tool_called` reads `org_opt_out`.
+`tool_called` reads `org_opt_out`. A call in flight at the moment of the opt-out finishes as it
+began, so a recording from it may still land; that is the switch doing exactly what it says
+(nothing NEW is stored from now on), and erasure is what removes the rest.
 
-What the team had stored is erased by a sweep (`application/archive_erasure.py`), not by the
-settings request: rows go in bounded transactions and object deletes run with no connection held
-(non-negotiable 3), so the request only records the objection and pokes the worker. The sweep
-(`archive_erasure.sweep_worker`, a lifespan task where background tasks run, one background pool
-slot, `archive_erasure_interval_s`; `treg-worker admin erase-archive` runs one pass by hand)
-takes every team with `archive_opt_out_at` set and `archive_purged_at` NULL, and marks
-`archive_purged_at` when its erasure finished. The settings read reports that as
-`archive_erasure: pending | done`. What "the team's" means is decided by the governance domain
-(`teams.private_archive_key_ids`, `teams.erase_archive_rows`): every key under the team's own
-`org:`/`conn:` scopes, with its snapshots and the request shape the key row carries, plus every
-`ArchiveKeyOrg` mark of the team. A platform-key answer is a public question and stays; once the
-marks are gone nothing in the archive names the team. Objects go before rows, per batch:
+**Erasure is a separate act, never a side effect of the switch.** Two things run it: deleting
+the team, and `treg-worker admin erase-archive --org <id>` when a team asks for its stored
+answers to go (`application/archive_erasure.erase_org`). Both refuse a team still in the archive:
+with the gate shut nothing of the team's is being recorded while its rows are removed, which is
+what makes the job simple. No sweep, no pending state, no coordination with the recorder. What
+"the team's" means is decided by the governance domain (`teams.private_archive_key_ids`,
+`teams.erase_archive_rows`): every key under the team's own `org:`/`conn:` scopes, with its
+snapshots and the request shape the key row carries, plus every `ArchiveKeyOrg` mark of the
+team. A platform-key answer is a public question and stays; once the marks are gone nothing in
+the archive names the team. Objects go before rows, in batches of keys, in short transactions on
+the request pool with no connection held across object I/O (non-negotiable 3):
 `teams.archive_bodies_only_under` judges, in one anti-join, which content hashes no other key's
 snapshot shares (a body is content-addressed and deduplicated across keys), those objects are
-deleted through the store's one `delete`, and only then are the rows deleted. A failed object
-delete stops the pass before the rows, so the next pass retries from them; a deleted row would
-have left its object behind for good. The endpoint running totals move with the rows, taken from
-what each DELETE returned rather than from a count read beforehand, so two erasers on the same
-rows (the sweep racing an owner delete, two instances in a rolling deploy) subtract once.
+deleted through the store's one `delete` and forgotten by the in-process upload cache
+(`archive_bodies.forget`, so an identical answer recorded later uploads again), and only then are
+the rows deleted. A failed object delete stops the pass before the rows, so a retry starts from
+them; a deleted row would have left its object behind for good. The endpoint running totals move
+with the rows, taken from what each DELETE returned rather than from a count read beforehand, so
+two erasers on the same rows subtract once. One race is accepted and documented in the module:
+between judging a body an orphan and deleting it, another team can record the identical bytes;
+its snapshot then reads as "bytes not on file", which every reader tolerates as a miss.
 
-The archive has other writers, and the sweep is held against them three ways. **Bound to one
-objection**: `erase_org` carries the `archive_opt_out_at` it read and re-reads the team's
-standing before every destructive pass; a team that opted back in since (or out again, a new
-objection) stops the old erasure untouched, and the completion mark is written only where the
-objection is still the same one. **Late writers refuse**: the call path gated on the team's
-standing as the call began, so a call in flight at the opt-out can still finish; the recorder
-(`archive._store`, before any upload) and the settle mark (`note_org_use_in_transaction`)
-therefore re-read the org row and write nothing for a team that is opted out or gone.
-**Completion waits**: the rows are erased at once, but `archive_purged_at` is set only once the
-objection is older than `archive_erasure.grace_s()` (a call's lifetime plus a margin), so nothing
-from before the objection can land after the team was told its erasure is done. Opting back in
-clears both timestamps; nothing erased comes back. One race is accepted and documented in the
-module: between judging a body an orphan and deleting it, another team can record the identical
-bytes; its snapshot then reads as "bytes not on file", which every reader tolerates as a miss.
-
-Deleting a team runs the same erasure: the owner route sets the opt-out first and commits it (the
-fence that makes late writers refuse), calls `erase_org` once its request session has let go of
-its connection and before the cascade, so a failure keeps the team (opted out) for a retry;
-`cascade_delete_org` itself deletes the rows (the archive keys no foreign key at the team, so the
-cascade's FK-walking guard test never sees them), which keeps every other deletion path (admin
-force-delete, the sandbox reaper, the demo reset) from leaving rows behind, at the price of
-objects those paths do not clear. Out of scope, deliberately, and said so in every user-facing
-sentence: the terminal evidence of async tasks (`treg://asynctasks/<call_id>`, settlement
+Deleting a team: the owner route sets the opt-out and commits it, calls `erase_org` once its
+request session has let go of its connection and before the cascade (a failure keeps the team,
+opted out, for a retry), then cascades. `cascade_delete_org` itself deletes the rows (the archive
+keys no foreign key at the team, so the cascade's FK-walking guard test never sees them), which
+keeps every other deletion path (admin force-delete, the sandbox reaper, the demo reset) from
+leaving rows behind, at the price of objects those paths do not clear. Out of scope,
+deliberately: the terminal evidence of async tasks (`treg://asynctasks/<call_id>`, settlement
 evidence under a public key with no team provenance), the `callrecord` audit trail and the
 idempotency replay store, which is the caller's own request and has its own window.
 

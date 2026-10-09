@@ -509,26 +509,22 @@ export default {
                 </div>
 
                 <!-- THE ARCHIVE. A team-level privacy setting (docs/context/architecture/archive.md,
-                     "Opting out"): off means no call is answered from or recorded into treg's archive
-                     and what the team stored is erased. The erasure runs in the background, so the
-                     reply says whether it is still pending. -->
+                     "Opting out"): off means no call is answered from or recorded into treg's archive.
+                     Erasing what was stored is a separate act (team deletion, or on request). -->
                 <div v-if="capCfg" style="margin-top:22px;border-top:1px solid var(--line);padding-top:14px">
                   <span class="lbl" style="margin:0">Archive</span>
                   <p class="sub" style="margin:4px 0 8px;font-size:12px">
                     treg keeps answers to the exact questions your agents ask so a repeat can be served
                     from storage: free on your own keys, at a reduced price on treg's. Turn it off and
-                    every call goes to the provider live at the full price, no answer is stored for a
-                    repeat, and the answers stored for this team are erased. Call records, idempotency
-                    replays and the completion evidence of async tasks are kept as before.
+                    every call goes to the provider live at the full price, and no answer is stored for
+                    this team. Answers already stored are erased when the team is deleted, or on
+                    request through support.
                   </p>
                   <div class="field" style="max-width:560px;align-items:center">
-                    <label class="tgl" :title="capCfg.archive?'archive on — click to opt out and erase':'archive off — click to opt back in'">
+                    <label class="tgl" :title="capCfg.archive?'archive on — click to opt out':'archive off — click to opt back in'">
                       <input type="checkbox" :checked="capCfg.archive" :disabled="archiveBusy" @change="setArchive($event.target.checked)"/>
                       <span>{{capCfg.archive?'on':'off'}}</span>
                     </label>
-                    <span v-if="!capCfg.archive" class="sub" style="margin:0">
-                      erasure of what this team had stored: <b>{{capCfg.archive_erasure==='done'?'done':'pending'}}</b>
-                    </span>
                   </div>
                   <p v-if="archiveErr" class="banner" style="margin:10px 0 0">{{archiveErr}}</p>
                 </div>

@@ -239,10 +239,9 @@ treg-owned aggregator account — same request, same response shape, the relay's
 then get the 503 above); `treg org overflow` shows the setting. Own keys are never relayed.
 
 `treg org archive off` takes your team out of treg's archive of answers: no call of yours is answered
-from a stored answer or recorded into one, every call reaches the provider at the live price (no
-free or repeat-priced hits), and the answers stored for the team are erased; call records and the
-completion evidence of async tasks stay. `treg org archive` shows the setting and whether that
-erasure is still pending; `treg org archive on` opts back in.
+from a stored answer or recorded into one, and every call reaches the provider at the live price (no
+free or repeat-priced hits). `treg org archive` shows the setting; `treg org archive on` opts back in.
+Answers already stored for the team are erased when the team is deleted, or on request.
 
 ### Routed endpoints — let treg choose the provider
 

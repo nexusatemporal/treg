@@ -1,5 +1,5 @@
-"""A team's archive opt-out (archive.md, "Opting out"): the gate on the call path, the erasure of
-what the team stored, and the settings that record it.
+"""A team's archive opt-out (archive.md, "Opting out"): the gate on the call path, the setting that
+records it, and the separate erasure of what the team stored (team deletion, the worker command).
 
 Runs in the sqlite suite and in CI's serial Postgres job like test_archive.py.
 """
@@ -43,15 +43,8 @@ async def _marks():
         return (await s.execute(select(ArchiveKeyOrg))).scalars().all()
 
 
-@pytest.fixture
-def no_grace(monkeypatch):
-    """Completion normally waits out a call's lifetime (archive_erasure.grace_s); the erasure
-    tests are about what is erased, so they let the sweep declare itself done at once."""
-    monkeypatch.setattr(archive_erasure, "grace_s", lambda: 0)
-
-
 async def _record_own_answer(org_id: int, body: bytes, question: str = "aweme_id=7") -> None:
-    """What a late recorder does: an own-credential answer for `org_id`, keyed to the org."""
+    """An own-credential answer for `org_id`, keyed to the org, as the recorder stores it."""
     await archive._store(
         method="GET", endpoint_id=EP, provider="tikhub",
         url=f"https://api.tikhub.io/x?{question}", caller_body=b"", headers={},
@@ -76,7 +69,7 @@ async def test_an_opted_out_team_is_neither_served_nor_recorded_on_treg_key(
     monkeypatch.setattr(call_service.analytics, "capture",
                         lambda who, event, props, **kw: events.append((event, props)))
     cfg = await _opt_out(clients, org_id)
-    assert cfg["archive"] is False and cfg["archive_erasure"] == "pending"
+    assert cfg["archive"] is False
     # The public answer is on file and the question is a repeat for this team, yet it reaches
     # the vendor at full price: no hit, no repeat discount, no mark.
     r2 = await clients.get(f"/call/{EP}?aweme_id=7&count=5")
@@ -97,7 +90,7 @@ async def test_an_opted_out_team_is_neither_served_nor_recorded_on_treg_key(
     assert [row.get("cached") for row in rows[:2]] == [False, False]
     # Back in: the next call is a hit again, at full price (the erasure took the team's mark).
     r = await clients.patch(f"/orgs/{org_id}/settings", json={"archive": True})
-    assert r.json()["archive"] is True and r.json()["archive_erasure"] is None
+    assert r.json()["archive"] is True
     r3 = await clients.get(f"/call/{EP}?aweme_id=7&count=5")
     assert r3.headers["X-Treg-Cache"] == "hit"
 
@@ -126,7 +119,7 @@ async def test_an_opted_out_teams_own_key_calls_skip_the_archive(
 # The erasure: what the team stored goes, what other teams stored stays
 
 async def test_erasure_removes_the_teams_private_keys_and_marks_and_nothing_else(
-        clients: AsyncClient, own_key_serve, monkeypatch, no_grace):
+        clients: AsyncClient, own_key_serve, monkeypatch):
     # Team A: an own-key answer (org-scoped key) and a platform answer it paid for (public key).
     _vendor_says(monkeypatch, OWN)
     await _own_key(clients)
@@ -152,15 +145,18 @@ async def test_erasure_removes_the_teams_private_keys_and_marks_and_nothing_else
     assert sorted(k.scope or "public" for k in keys) == ["org", "org", "public"]
     assert sorted(r.org_id == org_a for r in await _marks()) == [False, True]
 
+    # Still in the archive: erasure refuses, so nothing is removed while recording goes on.
+    with pytest.raises(archive_erasure.NotOptedOut):
+        await archive_erasure.erase_org(org_a)
     await _opt_out(clients, org_a)
-    assert await archive_erasure.sweep_once(session_factory=session_maker) == 1
+    result = await archive_erasure.erase_org(org_a)
+    assert result["keys"] == 1
     keys, snaps = await _rows()
     assert sorted(k.scope or "public" for k in keys) == ["org", "public"]
     assert all(s.origin_org_id != org_a for s in snaps)
     assert all(r.org_id != org_a for r in await _marks())
-    assert (await _settings(clients, org_a))["archive_erasure"] == "done"
-    # A second sweep finds nothing and changes nothing.
-    assert await archive_erasure.sweep_once(session_factory=session_maker) == 0
+    # A second run finds nothing and changes nothing.
+    assert (await archive_erasure.erase_org(org_a))["keys"] == 0
     # B is untouched: its own answer is still a hit.
     _vendor_says(monkeypatch, b'{"must": "not be asked"}')
     r = await clients.get(f"/call/{EP}?aweme_id=9", headers=hb)
@@ -173,7 +169,7 @@ async def test_erasure_removes_the_teams_private_keys_and_marks_and_nothing_else
 
 
 async def test_erasure_deletes_orphaned_objects_but_keeps_shared_ones(
-        clients: AsyncClient, own_key_serve, monkeypatch, no_grace):
+        clients: AsyncClient, own_key_serve, monkeypatch):
     """Bodies are content-addressed: an object another team's snapshot still points at stays."""
     store = MemoryObjectStore()
     bootstrap.configure_archive_object_store(store)
@@ -196,19 +192,26 @@ async def test_erasure_deletes_orphaned_objects_but_keeps_shared_ones(
         assert shared in store.objects and only_a in store.objects
         org_a = await _org_id(clients)
         await _opt_out(clients, org_a)
-        assert await archive_erasure.sweep_once(session_factory=session_maker) == 1
+        assert (await archive_erasure.erase_org(org_a))["objects"] == 1
         assert shared in store.objects and only_a not in store.objects
         assert store.delete_calls == 1
+        # The upload cache forgot the deleted hash: an identical answer recorded later uploads
+        # again instead of pointing at bytes that are gone (R2-only would otherwise lose it).
+        await clients.patch(f"/orgs/{org_a}/settings", json={"archive": True})
+        _vendor_says(monkeypatch, b'{"only": "a"}')
+        await clients.get(f"/call/{EP}?aweme_id=11")
+        await archive.drain()
+        assert only_a in store.objects
         async with session_maker() as s:
             left = (await s.execute(select(ArchiveSnapshot))).scalars().all()
-        assert len(left) == 1 and left[0].origin_org_id != org_a
+        assert len(left) == 2 and all(row.content_hash in store.objects for row in left)
     finally:
         await archive.drain()
         bootstrap.configure_archive_object_store(None)
 
 
-async def test_a_failed_object_delete_leaves_the_team_pending_for_the_next_sweep(
-        clients: AsyncClient, own_key_serve, monkeypatch, no_grace):
+async def test_a_failed_object_delete_keeps_the_rows_for_a_retry(
+        clients: AsyncClient, own_key_serve, monkeypatch):
     store = MemoryObjectStore()
     bootstrap.configure_archive_object_store(store)
     monkeypatch.setattr(archive.get_settings(), "archive_body_write", "both")
@@ -220,14 +223,15 @@ async def test_a_failed_object_delete_leaves_the_team_pending_for_the_next_sweep
         org_a = await _org_id(clients)
         await _opt_out(clients, org_a)
         store.fail_deletes = True
-        assert await archive_erasure.sweep_once(session_factory=session_maker) == 0
-        assert (await _settings(clients, org_a))["archive_erasure"] == "pending"
+        with pytest.raises(RuntimeError):
+            await archive_erasure.erase_org(org_a)
         keys, _ = await _rows()
         assert len(keys) == 1                                       # the rows wait for the retry
         store.fail_deletes = False
-        assert await archive_erasure.sweep_once(session_factory=session_maker) == 1
+        assert (await archive_erasure.erase_org(org_a))["keys"] == 1
         assert store.objects == {}
-        assert (await _settings(clients, org_a))["archive_erasure"] == "done"
+        keys, _ = await _rows()
+        assert keys == []
     finally:
         await archive.drain()
         bootstrap.configure_archive_object_store(None)
@@ -267,15 +271,15 @@ async def test_deleting_a_team_erases_its_archive_too(clients: AsyncClient, own_
 async def test_opt_out_is_admin_only_and_records_the_moment(clients: AsyncClient):
     org_id = await _org_id(clients)
     cfg = await _settings(clients, org_id)
-    assert cfg["archive"] is True and cfg["archive_erasure"] is None and cfg["archive_opt_out_at"] is None
+    assert cfg["archive"] is True and cfg["archive_opt_out_at"] is None
     cfg = await _opt_out(clients, org_id)
-    assert cfg["archive"] is False and cfg["archive_opt_out_at"] and cfg["archive_erasure"] == "pending"
+    assert cfg["archive"] is False and cfg["archive_opt_out_at"]
     first = cfg["archive_opt_out_at"]
     # Opting out again does not move the record: the objection stands from its first moment.
     assert (await _opt_out(clients, org_id))["archive_opt_out_at"] == first
     async with session_maker() as s:
         row = await s.get(Org, org_id)
-    assert row.archive_opt_out_at is not None and row.archive_purged_at is None
+    assert row.archive_opt_out_at is not None
     # A member who is not an admin may read it but not change it.
     inv = await clients.post(f"/orgs/{org_id}/invites", json={"email": "plain@example.com", "role": "member"})
     accepted = await clients.post("/invites/accept", json={"code": inv.json()["code"], "email": "plain@example.com"})
@@ -286,93 +290,8 @@ async def test_opt_out_is_admin_only_and_records_the_moment(clients: AsyncClient
     assert r.status_code == 403
 
 
-async def test_sweep_leaves_a_team_that_opted_back_in_alone(clients: AsyncClient, no_grace):
-    """A sweep that finds nothing to erase for a team marks it done; a team that opted back in
-    before the sweep ran is not marked (its new recordings are not what was erased)."""
-    org_id = await _org_id(clients)
-    await _opt_out(clients, org_id)
-    await clients.patch(f"/orgs/{org_id}/settings", json={"archive": True})
-    assert await archive_erasure.sweep_once(session_factory=session_maker) == 0
-    await _opt_out(clients, org_id)
-    assert await archive_erasure.sweep_once(session_factory=session_maker) == 1
-    assert (await _settings(clients, org_id))["archive_erasure"] == "done"
-
-
 # ---------------------------------------------------------------------------------------------
-# The sweep against the archive's other writers: late recordings, late settles, a second eraser,
-# an objection withdrawn while the sweep ran
-
-async def test_completion_waits_out_a_call_that_began_before_the_objection(
-        clients: AsyncClient, own_key_serve, monkeypatch):
-    """The rows go at once; "done" waits until no call from before the opt-out can still land."""
-    _vendor_says(monkeypatch, OWN)
-    await _own_key(clients)
-    await clients.get(f"/call/{EP}?aweme_id=7")
-    await archive.drain()
-    org_id = await _org_id(clients)
-    await _opt_out(clients, org_id)
-    assert await archive_erasure.sweep_once(session_factory=session_maker) == 0
-    keys, _ = await _rows()
-    assert keys == []                                               # erased
-    assert (await _settings(clients, org_id))["archive_erasure"] == "pending"   # not yet claimed
-    monkeypatch.setattr(archive_erasure, "grace_s", lambda: 0)
-    assert await archive_erasure.sweep_once(session_factory=session_maker) == 1
-    assert (await _settings(clients, org_id))["archive_erasure"] == "done"
-
-
-async def test_a_late_recording_for_an_opted_out_team_is_refused(
-        clients: AsyncClient, own_key_serve, no_grace):
-    """A call that read "in the archive" when it began and records after the opt-out: the
-    recorder re-reads the team's standing and drops the answer, so the erasure stays complete."""
-    org_id = await _org_id(clients)
-    await _record_own_answer(org_id, OWN)
-    keys, _ = await _rows()
-    assert len(keys) == 1
-    await _opt_out(clients, org_id)
-    assert await archive_erasure.sweep_once(session_factory=session_maker) == 1
-    await _record_own_answer(org_id, b'{"late": true}', "aweme_id=8")   # the in-flight call lands
-    keys, snaps = await _rows()
-    assert keys == [] and snaps == []
-    # A deleted team is refused the same way: no row, no recording.
-    assert await archive._org_refuses_recording(org_id + 1000)
-
-
-async def test_a_late_settle_mark_for_an_opted_out_team_is_refused(clients: AsyncClient):
-    org_id = await _org_id(clients)
-    async with session_maker() as s:
-        await archive.note_org_use_in_transaction(s, org_id, "b" * 64)
-        await s.commit()
-    assert len(await _marks()) == 1
-    await _opt_out(clients, org_id)
-    async with session_maker() as s:
-        await archive.note_org_use_in_transaction(s, org_id, "c" * 64)   # a settle landing late
-        await s.commit()
-    assert [m.key_hash for m in await _marks()] == ["b" * 64]            # the sweep's to remove
-
-
-async def test_an_objection_withdrawn_while_the_sweep_runs_stops_it(
-        clients: AsyncClient, own_key_serve, no_grace):
-    """`erase_org` is bound to the objection it read: a team that opted back in (and recorded
-    anew) since is left alone, and the mark for that old objection is never written."""
-    org_id = await _org_id(clients)
-    await _record_own_answer(org_id, OWN)
-    first = (await _opt_out(clients, org_id))["archive_opt_out_at"]
-    from datetime import datetime
-    stale = datetime.fromisoformat(first)
-    # The team opts back in and records again before the bound erasure gets to run.
-    await clients.patch(f"/orgs/{org_id}/settings", json={"archive": True})
-    await _record_own_answer(org_id, b'{"fresh": 1}', "aweme_id=9")
-    result = await archive_erasure.erase_org(org_id, opted_out_at=stale, session_factory=session_maker)
-    assert result["aborted"] and result["keys"] == 0
-    keys, _ = await _rows()
-    assert len(keys) == 2                                            # nothing touched
-    # Opted out again: a NEW objection, which the sweep binds to and completes.
-    second = (await _opt_out(clients, org_id))["archive_opt_out_at"]
-    assert second != first
-    assert await archive_erasure.sweep_once(session_factory=session_maker) == 1
-    keys, _ = await _rows()
-    assert keys == []
-
+# Erasure beside the archive's other writers
 
 async def test_two_erasers_on_the_same_rows_subtract_the_totals_once(
         clients: AsyncClient, own_key_serve, monkeypatch):
@@ -400,8 +319,8 @@ async def test_two_erasers_on_the_same_rows_subtract_the_totals_once(
 
 
 async def test_deleting_a_team_fences_its_writes_first(clients: AsyncClient, own_key_serve, monkeypatch):
-    """The owner delete opts the team out before erasing, so a recording from a call still in
-    flight is refused rather than recreating rows the cascade just removed."""
+    """The owner delete opts the team out before erasing, so nothing new of the team's is
+    recorded from that moment, and a team still in the archive is never erased by accident."""
     org = (await clients.get("/orgs")).json()[0]
     seen = []
     real = archive_erasure.erase_org
@@ -415,11 +334,20 @@ async def test_deleting_a_team_fences_its_writes_first(clients: AsyncClient, own
     r = await clients.delete(f"/orgs/{org['org_id']}", params={"confirm": org["slug"]})
     assert r.status_code == 200, r.text
     assert seen == [True]
-    await _record_own_answer(org["org_id"], OWN)                     # the late recorder
+
+
+async def test_the_worker_command_erases_one_opted_out_team(clients: AsyncClient, own_key_serve, monkeypatch, capsys):
+    from treg import worker
+    _vendor_says(monkeypatch, OWN)
+    await _own_key(clients)
+    await clients.get(f"/call/{EP}?aweme_id=7")
+    await archive.drain()
+    org_id = await _org_id(clients)
+    monkeypatch.setattr(worker, "_need_server", lambda: None)
+    import argparse
+    assert await worker._admin_erase_archive(argparse.Namespace(org=org_id)) == 1   # still in
+    assert "still in the archive" in capsys.readouterr().out
+    await _opt_out(clients, org_id)
+    assert await worker._admin_erase_archive(argparse.Namespace(org=org_id)) == 0
     keys, _ = await _rows()
     assert keys == []
-
-
-def test_worker_command_is_registered():
-    from treg.worker import _admin_erase_archive  # noqa: F401
-    assert archive_erasure.worker_enabled()

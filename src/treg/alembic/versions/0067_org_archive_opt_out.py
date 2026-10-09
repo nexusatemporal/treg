@@ -1,13 +1,11 @@
-"""org.archive_opt_out_at / archive_purged_at: a team's archive opt-out and its erasure mark
+"""org.archive_opt_out_at: a team's archive opt-out
 
 Revision ID: 0067
 Revises: 0066
 Create Date: 2026-10-09
 
-Two nullable timestamps on `org`. The first is the moment an admin opted the team out of the
-archive (docs/context/architecture/archive.md, "Opting out"); the second is when the erasure
-sweep finished removing what the team had stored. NULL/NULL is every team today: in the archive,
-nothing to erase.
+One nullable timestamp on `org`: the moment an admin opted the team out of the archive
+(docs/context/architecture/archive.md, "Opting out"). NULL is every team today: in the archive.
 """
 from collections.abc import Sequence
 
@@ -22,10 +20,8 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.add_column("org", sa.Column("archive_opt_out_at", sa.DateTime(), nullable=True))
-    op.add_column("org", sa.Column("archive_purged_at", sa.DateTime(), nullable=True))
 
 
 def downgrade() -> None:
     with op.batch_alter_table("org") as batch:
-        batch.drop_column("archive_purged_at")
         batch.drop_column("archive_opt_out_at")

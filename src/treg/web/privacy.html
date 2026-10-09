@@ -241,7 +241,7 @@
     <tr><td>Credentials and OAuth tokens</td><td>Until you delete them, disconnect the provider, or delete the team</td></tr>
     <tr><td>Skills and tool definitions</td><td>Until deleted by you or a team admin</td></tr>
     <tr><td>Call and run audit records</td><td>While the owning team exists; deleted with it</td></tr>
-    <tr><td>Answers stored for your team so a repeat question can be served without a new call</td><td>Until a team admin opts the team out of that storage, or the team is deleted; both erase the answers stored for the team. Call records, idempotency replays and the completion evidence of async tasks follow their own rows above</td></tr>
+    <tr><td>Answers stored for your team so a repeat question can be served without a new call</td><td>While the owning team exists; deleted with it, or earlier on request. A team admin can stop the storing at any time in the team's settings</td></tr>
     <tr><td>Sign-in codes, rate-limit counters</td><td>Minutes — expired rows are swept automatically</td></tr>
     <tr><td>Invitations</td><td>Until accepted, revoked, or expired</td></tr>
     <tr><td>Hosting server logs</td><td>Our provider's default window (short)</td></tr>
@@ -256,8 +256,7 @@
   of these are formal legal rights; we honour all of them for everyone regardless.</p>
   <ul>
     <li><b>Self-serve:</b> the dashboard lets you delete credentials, tools, skills, and whole teams,
-      revoke all your tokens, and opt a team out of stored answers, which erases the answers stored
-      for it and stops storing new ones.</li>
+      revoke all your tokens, and stop answers being stored for a team.</li>
     <li><b>Everything else:</b> email <a href="mailto:jason@superdesign.dev">jason@superdesign.dev</a>.
       We'll respond within 30 days and won't charge you or treat you differently for asking.</li>
   </ul>

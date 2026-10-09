@@ -37,6 +37,12 @@ def configure(store: ObjectStore | None) -> None:
     _uploaded, _inflight, _queued_hashes = OrderedDict(), {}, set()
 
 
+def forget(content_hash: str) -> None:
+    """Drop one hash from the upload cache: its object was deleted (application/archive_erasure),
+    so the next identical answer must upload again rather than point at bytes that are gone."""
+    _uploaded.pop(content_hash, None)
+
+
 def uses_r2() -> bool:
     s = get_settings()
     return s.archive_body_write != "db" or any(

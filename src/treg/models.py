@@ -143,12 +143,10 @@ class Org(SQLModel, table=True):
     # add_column appends, keeping create_all test schemas aligned with the migrated shape.
     platform_overflow_disabled: bool = Field(default=False)
     # The team has opted out of the archive (docs/context/architecture/archive.md, "Opting out"):
-    # none of its calls is answered from or recorded into the archive, and what it had already
-    # stored is erased. A timestamp rather than a flag because the moment the team objected is the
-    # processing record; `archive_purged_at` is when the erasure sweep finished (NULL = pending).
-    # Appended last, like the column above, so create_all schemas match the migrated shape.
+    # none of its calls is answered from or recorded into the archive. A timestamp rather than a
+    # flag because the moment the team objected is the processing record. Appended last, like the
+    # column above, so create_all schemas match the migrated shape.
     archive_opt_out_at: NaiveUTC | None = Field(default=None)
-    archive_purged_at: NaiveUTC | None = Field(default=None)
 
 
 class User(SQLModel, table=True):

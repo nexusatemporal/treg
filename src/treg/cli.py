@@ -4556,8 +4556,8 @@ def cmd_org_overflow(args, cfg) -> None:
 
 def cmd_org_archive(args, cfg) -> None:
     """Show or set whether this team takes part in treg's archive of answers. Off = none of the
-    team's calls is answered from or recorded into the archive (every call reaches the provider at
-    the live price), and what the team had stored is erased."""
+    team's calls is answered from or recorded into the archive; every call reaches the provider at
+    the live price."""
     with _client(cfg) as c:
         org_id = _active_org_id(cfg, c)
         if org_id is None:
@@ -4569,12 +4569,10 @@ def cmd_org_archive(args, cfg) -> None:
     if _JSON_OVERRIDE or r.status_code >= 400:
         _show(r)
         return
-    body = r.json()
-    on = body.get("archive", True)
-    erasure = body.get("archive_erasure")
-    tail = ("" if on else
-            f"  {_M}(erasure of what the team had stored: {erasure or 'pending'}){_R}")
-    print(f"\n  archive: {_A if on else _AM}{'on' if on else 'off'}{_R}{tail}\n")
+    on = r.json().get("archive", True)
+    print(f"\n  archive: {_A if on else _AM}{'on' if on else 'off'}{_R}"
+          f"  {_M}(off: every call is live at the live price; nothing is served from or stored in "
+          f"the archive for this team){_R}\n")
 
 
 def cmd_org_budget_set(args, cfg) -> None:
@@ -6361,7 +6359,7 @@ def build_parser() -> argparse.ArgumentParser:
              "treg org overflow", "treg org overflow off")
     oov.add_argument("state", nargs="?", choices=["on", "off"], help="omit to show"); oov.set_defaults(fn=cmd_org_overflow)
     oar = mk(og, "archive", "Show or set whether this team takes part in treg's archive of answers; off "
-                            "erases what the team stored and makes every call live (admin+).",
+                            "makes every call live at the live price (admin+).",
              "treg org archive", "treg org archive off")
     oar.add_argument("state", nargs="?", choices=["on", "off"], help="omit to show"); oar.set_defaults(fn=cmd_org_archive)
     osr = mk(og, "set-role", "Change a member's role (owner only).", "treg org set-role 5 admin")

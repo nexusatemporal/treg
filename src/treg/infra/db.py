@@ -56,8 +56,6 @@ BACKGROUND_CONSUMERS: dict[str, int] = {
     "adsconv.worker": 1,          # holds its slot across two Google round trips — see follow-ups
     "archive.prune_worker": 1,    # holds one across a whole sweep
     "archive.refresh_worker": 1,
-    "archive.erasure_worker": 1,  # the opt-out sweep: short sessions, one pass at a time; the owner
-                                  # delete route draws the same slot for its one-off erase_org
     "catalog observation refresh": 1,   # singleflight, one task per process
     "api_keys last used": 1,      # throttled best-effort managed-key display metadata
 }

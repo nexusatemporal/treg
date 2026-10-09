@@ -65,7 +65,7 @@ async removeBudget(b){ this.budErr='';
       try{ await this.api(this._budgetUrl(b.dim, b.val), {method:'DELETE'}); await this._reloadBudgets();
       }catch(e){ this.budErr=this._errMsg(e, 'could not remove that'); } },
 // The archive opt-out (archive.md, "Opting out"). `capCfg` is the whole settings document, so the
-// reply replaces it and the erasure state ("pending"/"done") shows without another load.
+// reply replaces it.
 async setArchive(on){ this.archiveBusy=true; this.archiveErr='';
       try{
         this.capCfg=await this.api(`/orgs/${this.activeOrgId}/settings`,
