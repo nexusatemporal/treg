@@ -886,6 +886,26 @@ async def test_drain_dead_letters_a_row_with_neither_click_nor_human(clients, us
         assert row.failed_at is not None and "no human creator email" in row.error
 
 
+async def test_flag_off_parks_email_only_rows_instead_of_dead_lettering(clients, user_data_enabled, monkeypatch):
+    # Queued with the flag on, drained after an operator turns it off: the row must survive for the
+    # flag coming back, not be failed for good.
+    await reset_db()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://registry") as c:
+        org_id = (await c.post("/users", json={"email": "lead@example.com"})).json()["org_id"]
+    monkeypatch.setattr(user_data_enabled, "ads_conv_user_data", False)
+    fake = FakeAdsClient(FakeAdsResponse({"requestId": "req-1"}))
+    async with session_maker() as db:
+        result = await adsconv.drain_once(db, fake)
+        assert result == {"sent": 0, "failed": 0} and fake.calls == []
+        row = (await db.execute(select(AdConversion).where(AdConversion.org_id == org_id))).scalars().one()
+        assert row.failed_at is None and row.attempts == 0 and row.next_attempt_at is not None
+        row.next_attempt_at = None  # the park expires
+        db.add(row); await db.commit()
+    monkeypatch.setattr(user_data_enabled, "ads_conv_user_data", True)
+    async with session_maker() as db:
+        assert (await adsconv.drain_once(db, fake))["sent"] == 1
+
+
 async def test_terms_not_accepted_keeps_retrying_instead_of_dead_lettering(clients, user_data_enabled):
     # Google's exact refusal (validateOnly, 2026-09-21) until an operator accepts the Customer Data
     # Terms in the Ads UI. It is "not yet", not "never": the rows must outlive the attempt ceiling.

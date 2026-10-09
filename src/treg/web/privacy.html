@@ -120,7 +120,8 @@
       learning models</b> — ours or anyone else's.</li>
     <li>We do not run <b>analytics or session-replay scripts</b> on the signed-in dashboard. Pages load
       Google's gtag.js for ad-conversion measurement only, with every consent signal denied (no
-      advertising cookies; the dashboard sends only the one signup event) — there is no Google
+      advertising cookies; the dashboard sends Google's cookieless consent ping on load and one signup
+      event when you create your first team) — there is no Google
       Analytics property, no pixel, and no session replay anywhere.</li>
     <li>We never use your stored credentials for anything other than the call you or a permitted
       teammate initiated, plus automated health checks and token refreshes.</li>

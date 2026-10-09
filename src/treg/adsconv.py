@@ -492,13 +492,21 @@ async def drain_once(db: AsyncSession, client) -> dict:
     payload_ids = {row.id for row in payload_rows}
     skipped = [row for row in rows if row.id not in payload_ids]
     for row in skipped:
-        row.attempts += 1
-        row.failed_at = now
-        row.error = "outbox row has no attributable org: no click id and no human creator email"
+        org = orgs.get(row.org_id)
+        if org is not None and not org.ad_gclid and not user_data_enabled():
+            # Queued while Enhanced Conversions was on, and the flag is off now: park, never
+            # dead-letter, so turning it back on uploads them. Parked a full retry cap so a
+            # backlog of these can never crowd click-id rows out of the batch.
+            row.next_attempt_at = now + timedelta(seconds=_RETRY_CAP_S)
+            row.error = "waiting for TREG_ADS_CONV_USER_DATA (no click id)"
+        else:
+            row.attempts += 1
+            row.failed_at = now
+            row.error = "outbox row has no attributable org: no click id and no human creator email"
         db.add(row)
     if not payload["events"]:
         await db.commit()
-        return {"sent": 0, "failed": len(skipped)}
+        return {"sent": 0, "failed": sum(r.failed_at is not None for r in skipped)}
     headers = await _auth_headers(client)
     resp = await client.post(DATA_MANAGER_URL, json=payload, headers=headers)
 
@@ -554,7 +562,7 @@ async def drain_once(db: AsyncSession, client) -> dict:
                 failed += 1
             db.add(row)
     await db.commit()
-    return {"sent": sent, "retried": retried, "failed": failed + len(skipped),
+    return {"sent": sent, "retried": retried, "failed": failed + sum(r.failed_at is not None for r in skipped),
             "status": resp.status_code}
 
 
