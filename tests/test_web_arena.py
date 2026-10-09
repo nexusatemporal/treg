@@ -72,6 +72,8 @@ def test_fetch_reads_nested_markdown_and_markdown_content_from_catalog_adapters(
         ("branddev.web.scrape", {"url": "https://example.com", "markdown": {
             "requested": True, "success": True, "data": "# Example Domain"}}),
         ("olostep.web.scrape", {"result": {"markdown_content": "# Example Domain"}}),
+        ("parallel.web.extract", {"results": [{"url": "https://example.com", "excerpts": ["Example"],
+                                               "full_content": "# Example Domain"}]}),
     )
     for endpoint, response in examples:
         output = adapters[endpoint].from_upstream(response)
