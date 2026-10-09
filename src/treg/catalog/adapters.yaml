@@ -2997,7 +2997,8 @@ adapters:
     test_identity: {url: "https://example.com"}
     const: {body.advanced_settings.full_content: true}
     out: {pages: results, count: "len(results)"}
-    miss: "coalesce(results[0].full_content, results[0].excerpts, '') == ''"
+    # One page decides alone; with several, any page may have text and usage[] settles them.
+    miss: "choose(results[1] == null, coalesce(results[0].full_content, results[0].excerpts, '') == '', false)"
   olostep.web.scrape:
     accepts: [[url]]
     in: {url: body.url_to_scrape}

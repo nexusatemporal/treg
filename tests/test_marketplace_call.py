@@ -3266,6 +3266,37 @@ async def test_parallel_platform_call_settles_its_reported_usage_skus(
     assert seen == ["PLATFORM-PARALLEL", "OWN-PARALLEL"]
 
 
+@pytest.mark.parametrize(("endpoint", "body", "reply", "charged"), [
+    # The first page is empty but the second has text: usage[], not the first page, decides.
+    ("parallel.web.extract", {"urls": ["https://example.com", "https://example.org"]},
+     {"results": [{"url": "https://example.com", "excerpts": [], "full_content": None},
+                  {"url": "https://example.org", "excerpts": ["Example"], "full_content": None}],
+      "usage": [{"name": "sku_extract_excerpts", "count": 1}]}, 1_000),
+    # A successful answer without usage[] settles the base price the row holds, never more.
+    ("parallel.web.search", {"search_queries": ["x"], "mode": "fast"},
+     {"results": [{"url": "https://example.com", "excerpts": ["Example"]}]}, 1_000),
+    ("parallel.web.extract", {"urls": ["https://example.com"]},
+     {"results": [{"url": "https://example.com", "excerpts": ["Example"]}]}, 1_000),
+])
+async def test_parallel_settles_usage_or_the_base_price_never_a_first_page_miss(
+    clients, monkeypatch, endpoint, body, reply, charged,
+):
+    monkeypatch.setenv("TREG_PLATFORM_KEY_PARALLEL", "PLATFORM-PARALLEL")
+    monkeypatch.setenv("TREG_PLATFORM_PROVIDERS", "parallel")
+    get_settings.cache_clear()
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda request: _dropleads_response(200, reply))) as upstream:
+            monkeypatch.setattr(A.app.state, "http", upstream)
+            before = await _balance(clients)
+            r = await clients.post(f"/call/{endpoint}", json=body)
+    finally:
+        get_settings.cache_clear()
+    assert r.status_code == 200, r.text
+    assert r.headers["x-treg-cost-micro"] == str(charged)
+    assert before - await _balance(clients) == charged
+
+
 async def test_parallel_extract_of_only_unreadable_urls_is_free(clients, monkeypatch):
     """Live 2026-10-09: an unreachable URL comes back under errors[] with an empty usage list."""
     monkeypatch.setenv("TREG_PLATFORM_KEY_PARALLEL", "PLATFORM-PARALLEL")
