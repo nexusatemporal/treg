@@ -67,6 +67,11 @@ class Contract:
     verdict_map: dict[str, str] = field(default_factory=dict)
     # The check a caller may ask for with `X-Treg-Route-Verify`; None = the header is refused.
     check: Check | None = None
+    # True where a 2xx with nothing in it is the provider failing the job, not "no result": an
+    # empty scraped page, an empty results list. Measured success then counts such an answer
+    # against the endpoint (`stats.Tally.fold`), so a provider that answers 200 to everything
+    # cannot rank on a success rate it did not earn.
+    empty_is_failure: bool = False
 
     @property
     def required_output(self) -> tuple[str, ...]:
@@ -205,6 +210,7 @@ def parse_contracts(doc: dict) -> dict[str, Contract]:
             scoping=tuple(str(k) for k in scoping),
             prefer=tuple(str(p).lower() for p in c.get("prefer") or ()),
             check=_parse_check(cap, c.get("check"), c.get("output") or {}),
+            empty_is_failure=bool(c.get("empty_is_failure", False)),
             **_parse_verdict(cap, c.get("verdict")))
     return out
 
