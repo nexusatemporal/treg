@@ -522,10 +522,11 @@ export default {
                     support. Call records and async-task completion evidence are kept as before.
                   </p>
                   <div class="field" style="max-width:560px;align-items:center">
-                    <label class="tgl" :title="capCfg.archive?'archive on — click to opt out':'archive off — click to opt back in'">
-                      <input type="checkbox" :checked="capCfg.archive" :disabled="archiveBusy" @change="setArchive($event.target.checked)"/>
+                    <label class="tgl" :title="!canAdmin?'only a team admin can change this':(capCfg.archive?'archive on — click to opt out':'archive off — click to opt back in')">
+                      <input type="checkbox" :checked="capCfg.archive" :disabled="archiveBusy || !canAdmin" @change="setArchive($event.target.checked)"/>
                       <span>{{capCfg.archive?'on':'off'}}</span>
                     </label>
+                    <span v-if="!canAdmin" class="sub" style="margin:0">admins change this</span>
                   </div>
                   <p v-if="archiveErr" class="banner" style="margin:10px 0 0">{{archiveErr}}</p>
                 </div>
