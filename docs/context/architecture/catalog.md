@@ -1818,6 +1818,17 @@ Five rules worth keeping:
   endpoint look broken to every other tenant — precisely the failure the 4xx rule prevents. It was
   removed. "Never worked" is read off `ok_rate == 0`, which is computed from DECIDED samples only,
   so no volume of caller errors can produce it.
+- **An empty answer is a failure where the job demands content.** A contract marked
+  `empty_is_failure` (web.extract, web.search, google.serp.organic) counts a 2xx whose
+  `CallRecord.hit` is False as bad, in `Tally.fold` and in the live `observed` query alike
+  (`store.empty_is_failure`). `results.Result.hit` is False for a 2xx that names its own error in
+  the body (`provider_error`), so a provider answering 200 with `errors: [page_not_found]` counts
+  too. Without it a provider that answers 200 to everything ranks on a success rate it did not
+  earn; other capabilities keep "a miss is an answer". The judgement exists only where the
+  endpoint has a verified adapter `miss`, so every tool of these capabilities callable on treg's
+  key carries one; tools outside the routed jobs carry a judge-only adapter (`route: false`). A
+  test fails on any such tool without one (an own-key answer is not read, so tools treg's key
+  cannot call are exempt).
 
 ### Search scoring — most words must match, and the rare ones decide
 
