@@ -190,6 +190,32 @@ def test_you_web_adapters_are_verified_routed_children():
         assert child in cat.by_id[parent]["routed_children"], (parent, child)
 
 
+def test_parallel_adapters_are_routed_and_an_excerpt_only_page_is_a_hit():
+    cat = catalog_store.load()
+    for parent, child in (
+        ("treg.web.search", "parallel.web.search"),
+        ("treg.web.extract", "parallel.web.extract"),
+        ("treg.people.search", "parallel.people.search"),
+        ("treg.companies.search", "parallel.companies.search"),
+    ):
+        assert cat.adapters[child].verified, (child, cat.adapters[child].verify_note)
+        assert child in cat.by_id[parent]["routed_children"], (parent, child)
+    # A direct Extract without full_content still returns billed excerpts; only an empty page or
+    # an unreadable URL (results [], errors[]) is the free miss.
+    extract = cat.adapters["parallel.web.extract"]
+    assert not extract.is_miss({"results": [{"url": "u", "excerpts": ["text"], "full_content": None}]})
+    assert not extract.is_miss({"results": [{"url": "u", "excerpts": [], "full_content": "text"}]})
+    assert extract.is_miss({"results": [{"url": "u", "excerpts": [], "full_content": None}]})
+    assert extract.is_miss({"results": [], "errors": [{"url": "u", "error_type": "connect_error"}]})
+    # A multi-URL call is never judged by its first page: a later page may have text.
+    assert not extract.is_miss({"results": [{"url": "a", "excerpts": [], "full_content": None},
+                                            {"url": "b", "excerpts": ["text"], "full_content": "text"}]})
+    # With several pages, an explicitly empty usage[] is the miss; an absent one is unobserved.
+    empty = {"url": "a", "excerpts": [], "full_content": None}
+    assert extract.is_miss({"results": [empty, empty], "usage": []})
+    assert not extract.is_miss({"results": [empty, empty]})
+
+
 def test_search_adapter_does_not_treat_an_answer_without_results_as_a_miss():
     adapter = catalog_store.load().adapters["linkup.web.search"]
     assert adapter.verified

@@ -2609,6 +2609,35 @@ OCTEN = OAuthProvider(
     probe_deferred_statuses=(400,),
 )
 
+PARALLEL = OAuthProvider(
+    service="parallel",
+    display_name="Parallel",
+    auth_kind="key",
+    token_label="API key",
+    token_placeholder="your Parallel API key",
+    token_header="x-api-key",
+    token_format="{secret}",
+    setup_url="https://platform.parallel.ai",
+    setup_action_label="Get your Parallel API key",
+    setup_steps=(
+        "Sign in to the Parallel Platform and open API Keys.",
+        "Create or copy a key.",
+    ),
+    setup_note=(
+        "Search, Extract and Entity Search spend your Parallel balance. Connecting reads "
+        "the free monitor count, which spends nothing."
+    ),
+    auth_uri="", token_uri="",
+    scopes={},
+    client_id_setting="", client_secret_setting="",
+    category="SEO",
+    summary="Search the web, extract pages, and find people or companies from a description.",
+    base_url="https://api.parallel.ai",
+    docs_url="https://docs.parallel.ai/getting-started/overview",
+    # Free read: a bogus key answers 401 {"code":16,"message":"Invalid API key (C.1)"}.
+    probe_path="/v1/monitors/stats",
+)
+
 LINKUP = OAuthProvider(
     service="linkup",
     display_name="Linkup",
@@ -3934,7 +3963,7 @@ REGISTRY: dict[str, OAuthProvider] = {
         TIKHUB, BRIGHTDATA, SEMRUSH, JUSTONEAPI,
         SCRAPECREATORS,
         # SEO API-key providers
-        DATAFORSEO, SERANKING, MOZ, MAJESTIC, SERPSTAT, EXA, SEARCH1API, TAVILY, OCTEN, LINKUP, YOU, VALYU, KEENABLE, OLOSTEP, FIRECRAWL, CRAWL4AI, SPIDERCLOUD, PERPLEXITY,
+        DATAFORSEO, SERANKING, MOZ, MAJESTIC, SERPSTAT, EXA, SEARCH1API, TAVILY, OCTEN, LINKUP, PARALLEL, YOU, VALYU, KEENABLE, OLOSTEP, FIRECRAWL, CRAWL4AI, SPIDERCLOUD, PERPLEXITY,
         SCRAPEGRAPHAI, SERPER, LITESCRAPE, CLORO,
         # more Enrichment API-key providers
         LUSHA, CORESIGNAL, DIFFBOT, THECOMPANIESAPI, LEADMAGIC, ENRICHLAYER, FIBER_AI, CRUSTDATA, AVIATO,

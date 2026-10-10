@@ -59,6 +59,13 @@ sources:
   - src/treg/catalog/examples/linkup.web.fetch.structured.json
   - src/treg/catalog/examples/linkup.web.answer.json
   - src/treg/catalog/examples/linkup.web.answer.status.json
+  - src/treg/catalog/parallel.yaml
+  - src/treg/web/logos/parallel.svg
+  - src/treg/catalog/examples/parallel.web.search.json
+  - src/treg/catalog/examples/parallel.web.search.advanced.json
+  - src/treg/catalog/examples/parallel.web.extract.json
+  - src/treg/catalog/examples/parallel.people.search.json
+  - src/treg/catalog/examples/parallel.companies.search.json
   - src/treg/catalog/keenable.yaml
   - src/treg/catalog/olostep.yaml
   - src/treg/catalog/spidercloud.yaml
@@ -376,6 +383,14 @@ tasks after the owned
 `GET /v1/research/{id}` poll reports completion. The polling read is free and restricted to the
 team that submitted the task on the shared key. Account-wide task listing, mixed batch Tasks,
 closed-beta Extract, and the undocumented Responses route are outside the shared-key catalog.
+
+Parallel's Search and Extract responses list billed SKUs in `usage[]`, so their rows settle through
+generic `settle: usage` terms with a `[name=...]` selector. Search's turbo/fast and basic/advanced
+modes report the same `sku_search` name at different prices, so each price is its own row with a
+`mode` enum. Each row holds its base price, as Exa does; usage settles results past ten and each
+further Extract URL. An unreadable URL returns 200 under `errors[]` with an empty `usage[]`, and the
+routing miss releases the hold. Entity Search reports no usage: its people and companies rows settle
+the documented flat price and allow `match_limit` up to the 100 included results.
 
 Spider's `spidercloud.yaml` curates Scrape, Crawl, Search, Links, Unblocker and Screenshot. The
 standard routes are live-verified with public targets. Only the bounded Search listing is offered
