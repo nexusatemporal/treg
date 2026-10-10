@@ -302,6 +302,18 @@ counted separately. Owner-checked renewal and deletion prevent an old lease hold
 or deleting a newer owner's lease. TTL and renewal cannot prove that an old database transaction
 has stopped, which is why database locks remain necessary.
 
+Lease cleanup retries a transient timeout/connection failure at most once, always with the same
+token-checked Lua delete. Each attempt keeps its 200 ms deadline within a shared 400 ms per-key
+budget; authentication/permission errors and cancellation do not retry. These are asyncio time
+budgets, not hard wall-clock guarantees under scheduler stalls or cancellation cleanup. Multiple
+Org leases are cleaned up in reverse order, so a batch's cleanup budget scales with its keys.
+A retry finding no matching token reports `not_owned`: an earlier delete may have succeeded
+without its response, or the lease expired/changed owners. It cannot delete a replacement owner's
+lease and does not manufacture a new lease-loss observation. Repeated failures leave expiry as
+the backstop. Cleanup still follows database session closure and never repeats accounting or
+upstream work. The admission acquisition budget remains five seconds; cleanup is observed
+separately from execution in the existing scope totals.
+
 This is best-effort contention isolation, not a global money concurrency cap, durable queue or
 promise of FIFO across processes. Serializing the entire application session also serializes work
 such as Hold claims and session cleanup that previously could overlap; even without polling

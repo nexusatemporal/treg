@@ -17,8 +17,10 @@ _SECRET = "redis://sensitive-user:password@private-host/3 private-key private-to
 @pytest.fixture(autouse=True)
 def clear_lease_errors():
     kv.drain_lease_errors()
+    kv.drain_lease_timings()
     yield
     kv.drain_lease_errors()
+    kv.drain_lease_timings()
 
 
 async def _invoke(store, phase):
@@ -64,8 +66,11 @@ async def test_lease_failures_are_classified_without_secret_data(
 
     rows = kv.drain_lease_errors()
     assert len(rows) == 1
+    expected_count = (2 if phase == "release" and error_type in {
+        "deadline_exceeded", "redis_timeout", "connection",
+    } else 1)
     assert rows[0] == {
-        "event": "kv_lease_error", "phase": phase, "error_type": error_type, "count": 1,
+        "event": "kv_lease_error", "phase": phase, "error_type": error_type, "count": expected_count,
         "first_failed_at": "2020-01-01T00:00:00+00:00",
         "last_failed_at": "2020-01-01T00:00:00+00:00",
         "elapsed_max_ms": pytest.approx(25),

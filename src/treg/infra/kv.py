@@ -27,10 +27,17 @@ _clock = time.monotonic
 _utcnow = lambda: datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 _lease_error_lock = threading.Lock()
 _lease_errors: dict[tuple[str, str], dict] = {}
+_lease_timings: dict[tuple[str, str], dict] = {}
+_LEASE_OUTCOMES = {
+    "acquire": {"acquired", "busy", "unavailable", "cancelled"},
+    "renew": {"renewed", "lost", "unavailable", "cancelled"},
+    "release": {"released", "lost", "not_owned", "unavailable", "cancelled"},
+}
+_LEASE_BUCKETS = (10, 50, 100, 200)
 
 AcquireResult = Literal["acquired", "busy", "unavailable"]
 RenewResult = Literal["renewed", "lost", "unavailable"]
-ReleaseResult = Literal["released", "lost", "unavailable"]
+ReleaseResult = Literal["released", "lost", "not_owned", "unavailable"]
 _RENEW_LEASE = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
     return redis.call('pexpire', KEYS[1], ARGV[2])
@@ -137,39 +144,107 @@ class RedisStore:
         unlike optional invitation budgets, an outage must not discard a pending settlement.
         """
         started = _clock()
+        outcome = "cancelled"
         try:
             async with asyncio.timeout(_TIMEOUT_S * 2):
                 acquired = await self._client.set(key, token, nx=True, px=ttl_ms)
-            return "acquired" if acquired else "busy"
+            outcome = "acquired" if acquired else "busy"
+            return outcome
         except Exception as exc:  # noqa: BLE001 - cancellation still propagates to the owning scope
+            outcome = "unavailable"
             _record_lease_error("acquire", exc, started)
             return "unavailable"
+        finally:
+            _record_lease_timing("acquire", outcome, started)
 
     async def renew_lease(self, key: str, token: str, ttl_ms: int) -> RenewResult:
         started = _clock()
+        outcome = "cancelled"
         try:
             async with asyncio.timeout(_TIMEOUT_S * 2):
                 renewed = await self._client.eval(_RENEW_LEASE, 1, key, token, ttl_ms)
-            return "renewed" if renewed else "lost"
+            outcome = "renewed" if renewed else "lost"
+            return outcome
         except Exception as exc:  # noqa: BLE001
+            outcome = "unavailable"
             _record_lease_error("renew", exc, started)
             return "unavailable"
+        finally:
+            _record_lease_timing("renew", outcome, started)
 
     async def release_lease(self, key: str, token: str) -> ReleaseResult:
-        started = _clock()
-        try:
-            async with asyncio.timeout(_TIMEOUT_S * 2):
-                released = await self._client.eval(_RELEASE_LEASE, 1, key, token)
-            return "released" if released else "lost"
-        except Exception as exc:  # noqa: BLE001
-            _record_lease_error("release", exc, started)
-            return "unavailable"
+        """Retry one ambiguous transient failure with the same owner-checked delete.
+
+        A retry that finds no matching owner cannot distinguish a lost reply after DEL from an
+        expired/replaced lease. It is safe cleanup, but not evidence that this owner lost its
+        lease while working. No retry may delete a later owner's token.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _TIMEOUT_S * 4
+        for attempt in range(2):
+            if loop.time() >= deadline:
+                break
+            started = _clock()
+            outcome = "cancelled"
+            try:
+                async with asyncio.timeout_at(min(deadline, loop.time() + _TIMEOUT_S * 2)):
+                    released = await self._client.eval(_RELEASE_LEASE, 1, key, token)
+                outcome = "released" if released else ("not_owned" if attempt else "lost")
+                return outcome
+            except Exception as exc:  # noqa: BLE001 - cancellation never retries
+                outcome = "unavailable"
+                _record_lease_error("release", exc, started)
+                if attempt or not _transient_lease_error(exc):
+                    return "unavailable"
+            finally:
+                _record_lease_timing("release", outcome, started, retry=bool(attempt))
+        return "unavailable"
 
     async def aclose(self) -> None:
         try:
             await self._client.aclose()
         except Exception:  # noqa: BLE001
             pass
+
+
+def _transient_lease_error(exc: Exception) -> bool:
+    from redis import exceptions as errors
+
+    # Authentication errors inherit ConnectionError, but retrying them cannot recover a lease.
+    if isinstance(exc, (errors.AuthenticationError, errors.AuthorizationError, errors.NoPermissionError)):
+        return False
+    return isinstance(exc, (TimeoutError, errors.TimeoutError, errors.ConnectionError))
+
+
+def _record_lease_timing(phase: str, outcome: str, started: float, *, retry: bool = False) -> None:
+    """Fixed-cardinality command-attempt summaries; no IDs, I/O or per-command events."""
+    try:
+        if outcome not in _LEASE_OUTCOMES.get(phase, ()):
+            return
+        elapsed_ms = max(0.0, _clock() - started) * 1000
+        bucket = next((f"bucket_le_{limit}_ms" for limit in _LEASE_BUCKETS if elapsed_ms <= limit),
+                      "bucket_gt_200_ms")
+        with _lease_error_lock:
+            row = _lease_timings.setdefault((phase, outcome), {
+                "event": "kv_lease_gauge", "phase": phase, "outcome": outcome,
+                "count": 0, "retry_count": 0, "elapsed_total_ms": 0.0, "elapsed_max_ms": 0.0,
+                **{f"bucket_le_{limit}_ms": 0 for limit in _LEASE_BUCKETS}, "bucket_gt_200_ms": 0,
+            })
+            row["count"] += 1
+            row["retry_count"] += int(retry)
+            row["elapsed_total_ms"] += elapsed_ms
+            row["elapsed_max_ms"] = max(row["elapsed_max_ms"], elapsed_ms)
+            row[bucket] += 1
+    except Exception:  # noqa: BLE001 - observation must not change money admission behavior
+        pass
+
+
+def drain_lease_timings() -> list[dict]:
+    """Disjoint duration buckets per attempt; only the existing background runner drains them."""
+    with _lease_error_lock:
+        rows = list(_lease_timings.values())
+        _lease_timings.clear()
+    return rows
 
 
 def _record_lease_error(phase: str, exc: Exception, started: float) -> None:

@@ -84,13 +84,16 @@ It samples in-process money transactions and event-loop wakeup delay, and sends 
 records to a dedicated log thread. Shutdown stops it after money-producing background work drains
 and before analytics drains. The worker command dispatcher uses the same lifecycle for every
 command, including asynchronous settlement; its final local summary has a bounded shutdown wait.
+The same runner drains fixed-cardinality lease command timings once per minute and at worker exit,
+to the existing local log sink and analytics queue; it adds no lease-probe task or connection.
 The [data-model](data-model.md#product-analytics-writer-analyticspy) fragment defines the trace's
 coverage, privacy and loss counters.
 
 The existing web money-timing timer also emits `money_admission_gauge` locally and to analytics;
 it adds no background sampler or per-request transport. `worker._run_command` emits the final
-admission window even when its command fails, attempts at most one second of analytics draining
-when a window exists, and closes the shared KV client before leaving the trace lifecycle.
+admission window even when its command fails, then attempts at most one second of analytics draining
+after the trace runner has queued its final lease/trace summaries. It closes the shared KV client
+before leaving the trace lifecycle.
 Short-worker delivery remains best effort, so use its local exit summary to distinguish missing
 network delivery from absent work. The final trace summary is emitted separately by its lifecycle.
 

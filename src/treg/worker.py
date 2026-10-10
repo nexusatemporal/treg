@@ -380,20 +380,25 @@ async def _run_command(args) -> int:
     from .infra.money_trace_runner import money_trace_lifespan
 
     # In particular, async hold settlement runs here without any web application's lifespan.
-    async with money_trace_lifespan(role="worker"):
-        try:
-            return await args.fn(args)
-        finally:
+    try:
+        async with money_trace_lifespan(role="worker"):
             try:
-                if emit_snapshot(role="worker", shutdown=True):
-                    # Best effort and bounded: the local exit summary remains available if the
-                    # analytics destination is slow or unavailable.
-                    async with asyncio.timeout(1):
-                        await analytics.drain()
-            except Exception:  # noqa: BLE001 - preserve the command's result/failure
-                pass
+                return await args.fn(args)
             finally:
-                await kv.close()
+                try:
+                    emit_snapshot(role="worker", shutdown=True)
+                except Exception:  # noqa: BLE001 - preserve the command's result/failure
+                    pass
+                finally:
+                    await kv.close()
+    finally:
+        try:
+            # The trace lifespan also queues lease/trace exit summaries. Drain once after all
+            # producers stop; a short worker must not queue its tail after its final send.
+            async with asyncio.timeout(1):
+                await analytics.drain()
+        except Exception:  # noqa: BLE001 - local exit summaries remain the fallback evidence
+            pass
 
 
 def main(argv: list[str] | None = None) -> int:
