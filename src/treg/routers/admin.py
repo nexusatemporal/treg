@@ -192,10 +192,12 @@ async def admin_share(
     minutes: int = 60, _: str = Depends(require_superadmin), db: AsyncSession = Depends(get_admin_session)
 ) -> dict:
     """Who served each job over the last `minutes` (at most 360). `requests` counts what callers
-    asked (direct calls and routed parents, never a routed attempt); `by_provider` counts the 2xx
-    answers each provider gave, directly or as a routed attempt, that its adapter did not judge a
-    miss (`CallRecord.hit` False: an empty page under a 200 is not an answer). One read over an
-    id range."""
+    asked (direct calls and routed parents, never a routed attempt). `by_provider` credits the
+    answer a caller actually got: a direct call's 2xx that its adapter did not judge a miss
+    (`CallRecord.hit` False), and, for a routed call, only the LAST attempt of a parent that
+    succeeded - the attempt whose answer the job returned. An earlier attempt the job moved on
+    from is not credited, whatever its status: a free provider's body is often streamed without
+    a `hit` verdict, so its empty 200s would otherwise count. Two reads over an id range."""
     from ..application import catalog_stats
     from ..domain.catalog import store as catalog_store
     minutes = max(1, min(minutes, 360))
@@ -205,9 +207,9 @@ async def admin_share(
     ok = case((and_(CallRecord.status_code.between(200, 299), or_(CallRecord.hit.is_(None), CallRecord.hit.is_(True))), 1),
               else_=0)
     rows = (await db.execute(
-        select(CallRecord.endpoint_id, CallRecord.provider, attempt, func.count(), func.sum(ok))
-        .where(CallRecord.id >= first, CallRecord.endpoint_id.is_not(None))
-        .group_by(CallRecord.endpoint_id, CallRecord.provider, attempt))).all()
+        select(CallRecord.endpoint_id, CallRecord.provider, func.count(), func.sum(ok))
+        .where(CallRecord.id >= first, CallRecord.endpoint_id.is_not(None), ~attempt)
+        .group_by(CallRecord.endpoint_id, CallRecord.provider))).all()
     by_id = catalog_store.load().by_id
 
     def capability(endpoint_id: str) -> str:
@@ -215,13 +217,31 @@ async def admin_share(
         return cap or (endpoint_id[len("treg."):] if endpoint_id.startswith("treg.") else "(none)")
 
     jobs: dict[str, dict] = {}
-    for endpoint_id, provider, is_attempt, n, n_ok in rows:
+    for endpoint_id, provider, n, n_ok in rows:
         job = jobs.setdefault(capability(endpoint_id), {"requests": 0, "answered": 0, "by_provider": {}})
-        if not is_attempt:
-            job["requests"] += n
-            job["answered"] += int(n_ok or 0)
+        job["requests"] += n
+        job["answered"] += int(n_ok or 0)
         if provider and provider != "treg" and n_ok:
             job["by_provider"][provider] = job["by_provider"].get(provider, 0) + int(n_ok)
+    # Routed attempts: the last attempt of each parent that answered 2xx is the one served.
+    parents_ok = {ref for (ref,) in (await db.execute(
+        select(CallRecord.call_ref).where(
+            CallRecord.id >= first, CallRecord.endpoint_id.like("treg.%"), ~attempt,
+            CallRecord.status_code.between(200, 299)))).all()}
+    last: dict[str, tuple[int, str, str | None, int, bool | None]] = {}
+    for ref, endpoint_id, provider, status, hit in (await db.execute(
+            select(CallRecord.call_ref, CallRecord.endpoint_id, CallRecord.provider,
+                   CallRecord.status_code, CallRecord.hit)
+            .where(CallRecord.id >= first, CallRecord.endpoint_id.is_not(None), attempt))).all():
+        parent, _, n = ref.rpartition(":r")
+        if parent not in parents_ok or not n.isdigit():
+            continue
+        if parent not in last or int(n) > last[parent][0]:
+            last[parent] = (int(n), endpoint_id, provider, status, hit)
+    for _, endpoint_id, provider, status, hit in last.values():
+        if provider and provider != "treg" and 200 <= status < 300 and hit is not False:
+            job = jobs.setdefault(capability(endpoint_id), {"requests": 0, "answered": 0, "by_provider": {}})
+            job["by_provider"][provider] = job["by_provider"].get(provider, 0) + 1
     ordered = sorted(jobs.items(), key=lambda kv: -kv[1]["requests"])
     return {"since": since.isoformat(), "minutes": minutes,
             "jobs": [{"capability": cap, **job} for cap, job in ordered]}

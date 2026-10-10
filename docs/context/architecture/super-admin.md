@@ -56,8 +56,9 @@ endpoints are unaffected (they use `require_superadmin`).
   call volume + success rate, `growth` counts — computed in-process over small result sets),
   `admin_orgs` (every org + member/role/tool/secret/bundle counts), `admin_org_detail`,
   `admin_users` (+ their memberships), `admin_tools`, `admin_calls`, `admin_share` (per job over the
-  last `minutes`: requests asked, and 2xx answers per provider, direct or as a routed attempt,
-  not counting a 200 its adapter judged a miss: `CallRecord.hit` False),
+  last `minutes`: requests asked, and the answers callers got per provider: a direct call's 2xx
+  that its adapter did not judge a miss, and only the last attempt of a routed parent that
+  succeeded),
   `admin_health` (non-`ok` secrets).
 - **Failure evidence:** `admin_errors` (`?days=7&limit=100&provider=&status=&tier=`) — failed calls at
   every credential tier, including plain own tools (`tier: null`), with `CallRecord.error_request` /
