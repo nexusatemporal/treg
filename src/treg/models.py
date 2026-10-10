@@ -1787,6 +1787,11 @@ class ArchiveSnapshot(SQLModel, table=True):
         # Partial index for the report's "refreshes today" count — only refresh-origin rows.
         Index("ix_archivesnapshot_refresh_fetched", "fetched_at",
               postgresql_where=text("origin = 'refresh'"), sqlite_where=text("origin = 'refresh'")),
+        # Partial index for "the keys this team fetched on its own credential" (archive erasure,
+        # run by every team deletion) — NULL on every platform-key snapshot, most of the table.
+        Index("ix_archivesnapshot_origin_org", "origin_org_id",
+              postgresql_where=text("origin_org_id IS NOT NULL"),
+              sqlite_where=text("origin_org_id IS NOT NULL")),
     )
 
     id: int | None = Field(default=None, primary_key=True)
