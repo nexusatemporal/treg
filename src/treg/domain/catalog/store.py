@@ -1685,3 +1685,11 @@ def headline_counts(cat: Catalog) -> tuple[str, int]:
     direct = [e for e in cat.by_id.values() if e.get("kind") != "routed"]
     providers = {e.get("provider") for e in direct if e.get("provider")}
     return f"{len(direct) // 100 * 100:,}+", len(providers)
+
+
+def empty_is_failure(endpoint_id: str) -> bool:
+    """True when this endpoint's capability contract counts an empty 2xx as a failure."""
+    cat = load()
+    cap = (cat.by_id.get(endpoint_id) or {}).get("capability")
+    contract = cat.contracts.get(cap) if cap else None
+    return bool(contract is not None and contract.empty_is_failure)

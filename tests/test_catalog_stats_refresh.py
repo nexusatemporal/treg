@@ -448,3 +448,34 @@ async def test_a_bucket_folded_before_verdicts_existed_reads_as_empty(clients):
     async with session_maker() as db:
         bucket = await db.get(EndpointDayStat, (VERIFY, day))
     assert bucket.n == 4 and bucket.verdicts == {"valid": 1}
+
+
+async def test_an_empty_answer_counts_against_a_strict_capability_on_both_paths(clients):
+    """`empty_is_failure` (scrape, search, Google organic): a 2xx the adapter judged empty is the
+    provider failing the job, so a provider that answers 200 to everything cannot keep a success
+    rate it did not earn. The fold and the live query agree; other capabilities are unchanged."""
+    from treg.domain.catalog import store as catalog_store
+    strict, plain = "tinyfish.web.fetch", EP
+    assert catalog_store.empty_is_failure(strict) and not catalog_store.empty_is_failure(plain)
+    old = timedelta(days=2)
+    for _ in range(3):
+        await _record(strict, 200, 100, ago=old, hit=True)
+    for _ in range(2):
+        await _record(strict, 200, 100, ago=old, hit=False)     # empty page under a 200
+    await _record(strict, 200, 100, ago=old, hit=None)          # no verdict: still a success
+    for _ in range(6):
+        await _record(plain, 200, 100, ago=old, hit=False)      # a plain miss is not a failure here
+    assert (await catalog_stats.refresh(session_maker, now=_now()))["caught_up"]
+
+    live = await _live([strict, plain])
+    folded = await PostgresEndpointObservationReader(session_maker).get_many([strict, plain])
+    assert folded[strict]["ok_rate"] == live[strict]["ok_rate"] == round(4 / 6, 4)
+    assert folded[strict]["p50_ms"] == live[strict]["p50_ms"]
+    assert folded[plain]["ok_rate"] == live[plain]["ok_rate"] == 1.0
+
+
+def test_an_error_named_inside_a_200_is_a_miss_for_the_hit_verdict():
+    from treg.domain.catalog.results import Result
+    assert Result("error", "provider_error").hit is False      # `errors: [page_not_found]` under a 200
+    assert Result("error", "http_error").hit is None           # a failed call has no verdict
+    assert Result("found", "adapter_hit").hit is True and Result("empty", "adapter_miss").hit is False

@@ -24,6 +24,10 @@ class Result:
 
     @property
     def hit(self) -> bool | None:
+        # A 200 whose body names its own error (`errors: [{"error": "page_not_found"}]`) found
+        # nothing: a miss for the hit verdict, while the state stays `error` for cache admission.
+        if self.state == "error" and self.reason == "provider_error":
+            return False
         return {"found": True, "empty": False}.get(self.state)
 
 
