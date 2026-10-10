@@ -1302,14 +1302,14 @@ async def close_deferred(items: list[DeferredSettle], *, charge: bool, why: str 
                         for d in pending
                     ])
                     total = sum(amount for d, amount in zip(pending, amounts) if charge and d.billable)
-                    # Archive marks also take row/unique-key locks. Acquire them after ALL money writes,
-                    # in a stable order, even for zero-cost batches with no balance/block locks. Keep
-                    # repeated marks: each child still increments its question's usage counter.
-                    uses = sorted(d.archive_use for d in pending
-                                  if charge and d.billable and d.archive_use is not None)
-                    for org_id, key_hash in uses:
+                    # Archive marks take row/unique-key locks after ALL money writes, including
+                    # zero-cost batches. The batch writer keeps a stable order and counts repeats
+                    # without one database round trip per child while money locks remain held.
+                    uses = [d.archive_use for d in pending
+                            if charge and d.billable and d.archive_use is not None]
+                    if uses:
                         with money_stage(db, "archive_use"):
-                            await archive.note_org_use_in_transaction(db, org_id, key_hash)
+                            await archive.note_org_uses_in_transaction(db, uses)
                 with timing.phase("commit"):
                     await db.commit()
     except Exception as exc:  # noqa: BLE001 — loudly, but never into the caller's response

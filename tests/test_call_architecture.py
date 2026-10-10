@@ -77,6 +77,7 @@ _DATAPLANE_DERIVED_WRITES = {
     # with the money or not at all.
     "archive_org_use_in_settle": (
         (settle._platform_settle, "archive.note_org_use_in_transaction"),
+        (settle.close_deferred, "archive.note_org_uses_in_transaction"),
     ),
     "overflow_budget_reservation": (
         (overflow._maybe_overflow_attempt, "overflow_spend_ledger.reserve_in_transaction"),
@@ -135,6 +136,7 @@ _DERIVED_WRITE_FILES = {
         "money_admission.admit", "adsconv.queue", "capacity_marks.strike", "capacity_marks.clear",
         "capacity_marks.clear_sweep_state",
         "overflow_spend_ledger.add_in_transaction", "archive.note_org_use_in_transaction",
+        "archive.note_org_uses_in_transaction",
     },
     _SRC / "application" / "call" / "overflow.py": {
         "capacity_marks.strike", "overflow_spend_ledger.add_in_transaction",
@@ -182,7 +184,7 @@ _EXPECTED_DERIVED_WRITE_SITES = {
     ("application/call/settle.py", "_platform_settle", "archive.note_org_use_in_transaction"),
     ("application/call/settle.py", "_close", "archive.note_org_use_in_transaction"),
     # a routed parent closing its children's deferred holds marks the paid question the same way
-    ("application/call/settle.py", "close_deferred", "archive.note_org_use_in_transaction"),
+    ("application/call/settle.py", "close_deferred", "archive.note_org_uses_in_transaction"),
     ("application/call/overflow.py", "_maybe_overflow_attempt", "capacity_marks.strike"),
     ("application/call/overflow.py", "_record_shadow", "overflow_spend_ledger.add_in_transaction"),
     ("application/call/overflow.py", "_finish_budget", "overflow_spend_ledger.add_in_transaction"),
