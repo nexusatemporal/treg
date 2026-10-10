@@ -342,3 +342,26 @@ async def test_admin_share_counts_requests_per_job_and_answers_per_provider(c):
     job = next(j for j in body["jobs"] if j["capability"] == "web.extract")
     assert job["requests"] == 6 and job["answered"] == 5
     assert job["by_provider"] == {"crawl4ai": 4, "tinyfish": 1}
+
+
+async def test_admin_share_counts_teams_so_one_heavy_team_is_one_vote(c):
+    """`teams`: one team with nine direct crawl4ai answers and one team with one routed tinyfish
+    answer are one vote each: team-weighted 50/50, while volume says 90/10."""
+    from treg.models import CallRecord
+    async with session_maker() as s:
+        for i in range(9):
+            s.add(CallRecord(org_id=1, user_email="u@example.com", tool_name="crawl4ai.web.scrape", method="POST",
+                             path="/call/x", status_code=200, endpoint_id="crawl4ai.web.scrape",
+                             provider="crawl4ai", call_ref=f"h{i}"))
+        s.add(CallRecord(org_id=2, user_email="v@example.com", tool_name="treg.web.extract", method="POST",
+                         path="/call/x", status_code=200, endpoint_id="treg.web.extract", provider="treg", call_ref="q1"))
+        s.add(CallRecord(org_id=2, user_email="v@example.com", tool_name="tinyfish.web.fetch", method="POST",
+                         path="/call/x", status_code=200, endpoint_id="tinyfish.web.fetch", provider="tinyfish",
+                         call_ref="q1:r0"))
+        await s.commit()
+    body = (await c.get("/admin/share?minutes=60", headers=_a())).json()
+    teams = next(j for j in body["jobs"] if j["capability"] == "web.extract")["teams"]
+    assert teams["total"] == 2 and teams["by_provider"] == {"crawl4ai": 1, "tinyfish": 1}
+    assert teams["weighted"] == {"crawl4ai": 0.5, "tinyfish": 0.5}
+    assert teams["direct"] == {"total": 1, "by_provider": {"crawl4ai": 1}}
+    assert teams["routed"] == {"total": 1, "by_provider": {"tinyfish": 1}}
