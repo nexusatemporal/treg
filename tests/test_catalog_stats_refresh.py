@@ -475,7 +475,12 @@ async def test_an_empty_answer_counts_against_a_strict_capability_on_both_paths(
 
 
 def test_an_error_named_inside_a_200_is_a_miss_for_the_hit_verdict():
-    from treg.domain.catalog.results import Result
-    assert Result("error", "provider_error").hit is False      # `errors: [page_not_found]` under a 200
+    from treg.domain.catalog.results import Result, classify
+    assert Result("error", "provider_error", empty=True).hit is False   # an error and nothing found
+    assert Result("error", "provider_error").hit is None       # an error beside real results
+    page = b'{"results":[{"url":"https://x.test/a","text":"' + b"word " * 50 + b'"}],"errors":[{"url":"https://x.test/b","error":"page_not_found"}]}'
+    gone = b'{"results":[],"errors":[{"url":"https://x.test/b","error":"page_not_found","status":404}]}'
+    assert classify("tinyfish.web.fetch", 200, gone).hit is False
+    assert classify("tinyfish.web.fetch", 200, page).hit is None
     assert Result("error", "http_error").hit is None           # a failed call has no verdict
     assert Result("found", "adapter_hit").hit is True and Result("empty", "adapter_miss").hit is False
