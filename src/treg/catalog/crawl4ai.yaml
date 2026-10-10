@@ -110,8 +110,8 @@ endpoints:
     scope: any_account
     method: GET
     path: /search
-    name: Search the web, fast multi-engine web search
-    summary: "Browser-free, multi-engine web search with ranked, cleaned results (title, url, snippet, source)."
+    name: "Search the web: live ranked results with title, URL, snippet"
+    summary: "Live web search across several engines, ranked and cleaned: each result has a title, URL and snippet. When the live web returns fewer than 10 results, results from the Crawl4AI index fill the list. For follow-up questions, related queries and an entity card, use crawl4ai.web.search.rich."
     input:
       queryParams:
         q: {type: string, required: true, note: "max 512 characters", example: "rust web crawler"}
