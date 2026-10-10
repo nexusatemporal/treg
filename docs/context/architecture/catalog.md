@@ -1836,6 +1836,12 @@ This is the shipped ranker: what `/catalog/search` and the CLI answer, the lexic
 discovery experiment measures against, and the page an agent's MCP search falls back to when the
 job-first answer abstains ([search-experiment](search-experiment.md)).
 
+A query word matches only at the START of a word in a field (`store._needles`, haystacks stored
+word-padded by `_padded`): "search" matches "searches" but not "research", "ads" not "leads". A
+substring match tied a research-task status row with every search tool on "web search", and the
+evidence sort then put the free, always-200 status row first. CJK variants keep matching anywhere,
+since CJK text has no spaces between words.
+
 `catalog_store.search` demanded EVERY query token match (AND). Right for the 2–3 word refinement
 ("tiktok comments" must not return every tiktok endpoint), and fatal for how agents actually query:
 the day the SearchMiss log shipped it recorded "company job postings hiring open jobs linkedin" → 0
