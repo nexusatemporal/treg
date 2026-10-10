@@ -58,7 +58,8 @@ endpoints are unaffected (they use `require_superadmin`).
   `admin_users` (+ their memberships), `admin_tools`, `admin_calls`, `admin_share` (per job over the
   last `minutes`: requests asked, and the answers callers got per provider: a direct call's 2xx
   that its adapter did not judge a miss, and only the last attempt of a routed parent that
-  succeeded),
+  succeeded; `teams` gives the same answers per team: teams served per provider, the share
+  averaged over teams, and the direct and routed team counts),
   `admin_health` (non-`ok` secrets).
 - **Failure evidence:** `admin_errors` (`?days=7&limit=100&provider=&status=&tier=`) — failed calls at
   every credential tier, including plain own tools (`tier: null`), with `CallRecord.error_request` /
