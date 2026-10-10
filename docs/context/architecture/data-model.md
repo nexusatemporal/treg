@@ -629,6 +629,10 @@ events or org/call IDs in these aggregates.
 Elapsed time is client-observed, including connection setup and event-loop scheduling, not Redis
 server execution time. A type narrows the failing boundary; it does not establish a network or
 server root cause by itself. Normal contention and task cancellation are not lease errors.
+Counts describe failed command attempts, including a first release attempt that a retry recovers;
+they are not counts of failed money transactions or failed release scopes.
+Admission's release `kv_errors` increments only if cleanup ultimately returns unavailable; an
+error followed by a successful retry still appears in attempt diagnostics, but not that counter.
 
 `MoneyTraceRunner._emit` drains these buckets on its existing minute cadence and at shutdown,
 before its local sink closes. The existing bounded background log sink adds build/process/role
@@ -636,6 +640,23 @@ and writes them; lease operations perform no diagnostic I/O. No exception messag
 key or owner token is retained. Queue/rate/sink/shutdown loss remains possible and is exposed by
 the runner's existing loss/error counters; the absence of a detail log is not proof of no failure.
 The existing `money_admission_gauge` KV/fallback counters remain the independent aggregate signal.
+
+`kv_lease_gauge` reuses the same minute/worker-exit runner for local logs and PostHog. Each actual
+lease command attempt increments an in-memory bucket by phase and fixed outcome; at most 13
+buckets exist per process. Each summary holds `count`, `retry_count`, `elapsed_total_ms`,
+`elapsed_max_ms` and disjoint duration buckets (up to 10, 50, 100, 200 ms, or above 200 ms), with
+build/process/role, window duration and shutdown metadata. `retry_count` counts second release
+attempts, including failed or cancelled ones. `unavailable` denotes a failed attempt; the local
+`kv_lease_error` supplies its error class. `not_owned` means a release retry found no matching
+token: the earlier delete may have succeeded without a reply, or the lease expired/changed owner.
+It is neither proof of renewed ownership nor a new `lease_lost` observation. Previously detected
+renewal loss remains recorded. Normal `busy` attempts and cancellations have distinct outcomes.
+No org, key, token, URL or exception text is retained. There is no new sampler, probe connection
+or per-command analytics call. A short worker's local exit summary remains authoritative for
+coverage when its analytics tail is undelivered. Logs share existing rate/queue limits; analytics
+remains best effort. Means use elapsed totals divided by attempt counts; buckets bound quantiles,
+not exact p95. Client elapsed time includes connection setup, network and scheduling; these
+measurements alone do not isolate server execution or explain an admission queue's long tail.
 
 `wait_total_ms` / `wait_max_ms` cover admission before the session, including failed-acquisition
 cleanup. `execution_total_ms` / `execution_max_ms` cover the admitted application session scope,

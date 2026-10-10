@@ -17,6 +17,7 @@ def trace(monkeypatch):
     pending = []
     calls = []
     monkeypatch.setattr(runner_module.kv, "_lease_errors", {})
+    monkeypatch.setattr(runner_module.kv, "_lease_timings", {})
 
     def drain():
         result, pending[:] = list(pending), []
@@ -105,6 +106,98 @@ def test_lease_errors_are_not_drained_after_sink_shutdown(trace):
     runner = runner_module.MoneyTraceRunner(role="worker", capture_gauge=lambda props: None)
     runner._emit(now=time.monotonic(), local=False)
     assert len(kv.drain_lease_errors()) == 1
+
+
+async def test_lease_timing_summary_flushes_once_per_window_and_worker_exit(trace):
+    kv = runner_module.kv
+    logs, gauges, lease_gauges = [], [], []
+    runner = runner_module.MoneyTraceRunner(
+        role="worker", sample_s=0.005, emit_s=0.015, log_event=logs.append,
+        capture_gauge=gauges.append, capture_lease_gauge=lease_gauges.append).start()
+    try:
+        for _ in range(100):
+            kv._record_lease_timing("acquire", "busy", kv._clock())
+        await _until(lambda: lease_gauges)
+        kv._record_lease_timing("release", "not_owned", kv._clock(), retry=True)
+    finally:
+        await runner.stop()
+    assert [(e["phase"], e["count"], e["retry_count"]) for e in lease_gauges] == [
+        ("acquire", 100, 0), ("release", 1, 1)]
+    assert [e["shutdown"] for e in lease_gauges] == [False, True]
+    assert all(e["process_instance"] == "trace-process" and e["build"] == "test-build"
+               and e["role"] == "worker" and e["window_s"] >= 0 for e in lease_gauges)
+    assert len([e for e in logs if e["event"] == "kv_lease_gauge"]) == 2
+    assert kv.drain_lease_timings() == []
+
+
+def test_lease_timing_not_drained_by_post_shutdown_summary(trace):
+    kv = runner_module.kv
+    kv._record_lease_timing("release", "released", kv._clock())
+    runner = runner_module.MoneyTraceRunner(role="worker", capture_gauge=lambda props: None)
+    runner._emit(now=time.monotonic(), local=False)
+    assert len(kv.drain_lease_timings()) == 1
+
+
+def test_lease_transport_failure_preserves_later_summaries_and_trace_gauge(trace):
+    kv = runner_module.kv
+    gauges, attempts = [], []
+    kv._record_lease_timing("acquire", "acquired", kv._clock())
+    kv._record_lease_timing("release", "released", kv._clock())
+
+    def fail_capture(props):
+        attempts.append(props)
+        raise OSError("transport unavailable")
+
+    runner = runner_module.MoneyTraceRunner(role="worker", logs_per_window=0,
+                                          capture_gauge=gauges.append, capture_lease_gauge=fail_capture)
+    runner._emit(now=time.monotonic())
+    assert len(attempts) == 2
+    assert gauges[0]["runner_errors_total"] == 2
+    assert gauges[0]["log_rate_dropped_total"] == 2
+    assert kv.drain_lease_timings() == []
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled"])
+async def test_short_worker_sends_exit_lease_summary_before_return(trace, monkeypatch, outcome):
+    sent = []
+    monkeypatch.setattr(analytics, "enabled", lambda: True)
+    monkeypatch.setattr(analytics, "_queue", [])
+    monkeypatch.setattr(analytics, "_flusher", None)
+    monkeypatch.setattr(analytics, "_fault_windows", {})
+
+    async def post(batch):
+        sent.extend(batch)
+
+    monkeypatch.setattr(analytics, "_post", post)
+    failure = RuntimeError("business failure")
+
+    async def command(args):
+        # No admission scope is needed: a lease attempt alone must survive a short worker exit.
+        runner_module.kv._record_lease_timing("release", "released", runner_module.kv._clock(), retry=True)
+        if outcome == "failure":
+            raise failure
+        if outcome == "cancelled":
+            raise asyncio.CancelledError
+        return 17
+
+    try:
+        if outcome == "success":
+            assert await worker._run_command(SimpleNamespace(fn=command)) == 17
+        elif outcome == "failure":
+            with pytest.raises(RuntimeError) as caught:
+                await worker._run_command(SimpleNamespace(fn=command))
+            assert caught.value is failure
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await worker._run_command(SimpleNamespace(fn=command))
+        lease_events = [e for e in sent if e["event"] == "kv_lease_gauge"]
+        assert len(lease_events) == 1
+        assert lease_events[0]["properties"]["shutdown"] is True
+        assert lease_events[0]["properties"]["retry_count"] == 1
+        assert analytics._queue == []
+        assert analytics._flusher is None
+    finally:
+        await analytics.drain()
 
 
 def test_lease_error_rate_loss_is_visible_in_same_gauge(trace):

@@ -291,6 +291,43 @@ async def test_lease_loss_does_not_cancel_money_and_old_owner_cannot_delete_new_
     assert row["lease_lost"] == 1 and row["failed"] == 0
 
 
+async def test_ambiguous_release_retry_does_not_claim_lease_was_lost(gate, monkeypatch):
+    _, store = gate
+    original = store.release_lease
+
+    async def already_released(key, token):
+        # The first DEL succeeded but its reply was lost; a retry found no owner.
+        assert await original(key, token) == "released"
+        return "not_owned"
+
+    monkeypatch.setattr(store, "release_lease", already_released)
+    async with admission.admit([7], operation="close"):
+        pass
+    [row] = completed()
+    assert row["lease_lost"] == 0 and row["kv_errors"] == 0
+    assert row["completed"] == 1 and row["failed"] == 0
+    assert not store.values
+    assert not admission._local_lock(7).locked()
+
+
+async def test_ambiguous_release_retry_preserves_previously_observed_lease_loss(gate, monkeypatch):
+    _, store = gate
+    store.lose_on_renew = True
+
+    async def no_longer_owner(key, token):
+        assert store.values[key][0] == "new-owner"
+        return "not_owned"
+
+    monkeypatch.setattr(store, "release_lease", no_longer_owner)
+    async with admission.admit([7], operation="close"):
+        await asyncio.wait_for(store.renewed.wait(), 1)
+        await asyncio.sleep(0)
+    [row] = completed()
+    assert row["lease_lost"] == 1 and row["failed"] == 0
+    assert store.values["money-admission:org:7"][0] == "new-owner"
+    assert not admission._local_lock(7).locked()
+
+
 async def test_lease_renewal_preserves_ownership_while_body_runs(gate):
     _, store = gate
     async with admission.admit([7], operation="close"):

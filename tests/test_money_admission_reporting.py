@@ -72,4 +72,4 @@ async def test_worker_reports_and_drains_after_command_even_on_failure(monkeypat
         await worker._run_command(SimpleNamespace(fn=command))
     assert caught.value is failure
     assert events == ["command", ("report", {"role": "worker", "shutdown": True}),
-                      "drain", "close"]
+                      "close", "drain"]

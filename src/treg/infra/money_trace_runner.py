@@ -42,6 +42,11 @@ def _capture_gauge(properties: dict) -> None:
     analytics.capture(analytics.SERVER_DISTINCT_ID, "money_trace_gauge", properties)
 
 
+def _capture_lease_gauge(properties: dict) -> None:
+    from .. import analytics
+    analytics.capture(analytics.SERVER_DISTINCT_ID, "kv_lease_gauge", properties)
+
+
 class _LogSink:
     """One bounded queue and thread. No logging or thread join runs on the asyncio loop."""
 
@@ -150,6 +155,7 @@ class MoneyTraceRunner:
     def __init__(self, *, role: str, sample_s: float = _SAMPLE_S, emit_s: float = _EMIT_S,
                  log_event: Callable[[dict], None] = _log_event,
                  capture_gauge: Callable[[dict], None] = _capture_gauge,
+                 capture_lease_gauge: Callable[[dict], None] = _capture_lease_gauge,
                  log_capacity: int = _LOG_QUEUE_SIZE, logs_per_window: int = _LOGS_PER_WINDOW,
                  shutdown_s: float = _SHUTDOWN_S):
         self.role = role if role in {"all", "control", "dataplane", "worker"} else "unknown"
@@ -159,6 +165,7 @@ class MoneyTraceRunner:
         self.logs_per_window = logs_per_window
         self._sink = _LogSink(log_event, capacity=log_capacity)
         self._capture_gauge = capture_gauge
+        self._capture_lease_gauge = capture_lease_gauge
         self._task: asyncio.Task | None = None
         self._closed = False
         self._started = self._opened = self._last_sample = 0.0
@@ -238,6 +245,19 @@ class MoneyTraceRunner:
                 self._submit(kv.drain_lease_errors())
             except Exception:  # noqa: BLE001 - preserve the gauge even if a detail drain fails
                 self._diagnostic_errors += 1
+            try:
+                lease_rows = kv.drain_lease_timings()
+            except Exception:  # noqa: BLE001
+                lease_rows = []
+                self._diagnostic_errors += 1
+            for row in lease_rows:
+                try:
+                    event = self._decorate({**row, "window_s": round(max(0.0, now - self._opened), 3),
+                                            "shutdown": shutdown})
+                    self._submit([event])
+                    self._capture_lease_gauge({key: value for key, value in event.items() if key != "event"})
+                except Exception:  # noqa: BLE001 - one failed summary must not suppress the rest
+                    self._diagnostic_errors += 1
         try:
             props = self._properties(now)
             props["shutdown"] = shutdown
