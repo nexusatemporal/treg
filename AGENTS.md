@@ -51,7 +51,9 @@ Everything else in this file is guidance; these are the contract, and they win o
    call one that cannot be scanned is replaced whole, never relayed as a prefix.
    A live-verified free catalog endpoint may declare an anonymous fallback; its empty binding list
    omits credential injection but does not strip or rewrite caller headers.
-   Routed endpoints and overflow wrap the child's answer and say so; they never alter it. Responses needing settlement or ownership evidence are buffered by the application
+   Routed endpoints and overflow wrap the child's answer and say so; they never alter it. With
+   `X-Treg-Route-Verify`, an email or phone find makes one more linked child call (the check), with its own
+   hold and charge, and reports it in `_treg.verification`; the find's answer is not altered. Responses needing settlement or ownership evidence are buffered by the application
    up to 8 MiB; exceeding that limit fails without charging, never returns a successful prefix.
    An endpoint declaring `spooled_response` (inline media) instead reads its metered 2xx to an
    unlinked temp file under a per-body cap and per-process budget, settles from only the paths its
@@ -199,7 +201,11 @@ so parallel runs and side-by-side runs never share one.
   `fix: ...`, `docs: ...`); one logical change per commit; the PR says what changed and why and
   names the fragments it updated.
 - `/mcp/` and `/mcp/v2/` differ on purpose. A change to either or to shared MCP code is reviewed
-  against both; do not unify them in passing.
+  against both; do not unify them in passing. `/mcp/v2/`'s tools and hidden platforms match the
+  Claude directory submission: change them only with a resubmission. New features go to `/mcp/`.
+- **Every tool row carries `added:`**, the UTC day it reached main (`scripts/catalog_added.py`
+  writes today's where it is missing). Never change an existing one without the
+  `added-date-change` label; CI compares every tool id with the base branch.
 - **A catalog data PR is a few rows and a PR body.** Cache admission, comparison declarations,
   adapters and contracts are rows in `src/treg/catalog/`; each declaration carries a one-line
   reason and nothing more. The evidence (traffic, byte sizes, change observations, bodies read)

@@ -170,6 +170,30 @@ path or an exhausted reading from the sweep lets one call a minute through as a 
 its 2xx, so the `message` says a retry in a minute may succeed; otherwise it lasts until `resets_at`. Not the pool-saturation 503
 (`treg_saturated`), which is a different exit. See `architecture/proxy-model.md` § Platform capacity.
 
+## `503 provider_paused` - this deployment paused the provider
+
+`TREG_PAUSED_PROVIDERS` (comma-separated service ids) pauses a provider on one deployment. Every
+call that would reach it is refused **before any hold, token refresh or upstream request** with
+`{"detail": {"error": "provider_paused", "provider", "endpoint_id"?, "message"}}`, `X-Treg-Error: 1`,
+no `X-Treg-Cost-Micro`, `refused_by="paused"` on the audit row. That covers a catalog id
+(`resolve_marketplace_target`), a connection's own tool, and a URL passthrough to its hosts (both
+resolve to the tool bound to the provider's connection; refused once its secrets load in
+`service._execute_call`), plus `GET /catalog/endpoints/{id}/access`. `message` is the default
+sentence or the service's entry in `TREG_PAUSED_PROVIDER_MESSAGES`.
+
+The rest of the surface agrees: catalog search, `/catalog/find`, the MCP `catalog_search` tools,
+routed plans and the alternatives named in refusals leave the provider's endpoints out;
+`GET /catalog/endpoints/{id}` and MCP `catalog_get` answer `provider_paused` instead of the entry;
+`GET /oauth/providers` leaves the provider out; `POST /oauth/start`, `POST /connections/token`,
+the resource routes and the extra-credential route refuse with the same 503 body. Existing
+connections are never changed: `GET /connections` returns them with `paused: true`,
+`paused_message` and `provider_display_name`, and the health sweep skips them. `GET /meta` carries
+`paused_providers` (`{service: {display_name, message}}`), so the dashboard can say why where the
+provider is still reachable: its catalog tile reads Paused, its shelf and every tool panel show the
+message in place of the call line and the connect and copy buttons, and its provider page shows the
+message and the team's kept connections. The public platform and provider pages still list the
+provider's endpoints.
+
 ## `X-Treg-Served-Via` - this answer came through an overflow relay
 
 `GET/PATCH /orgs/{id}/settings` carries `platform_overflow` (default `true`); `false` opts the team out -
@@ -232,9 +256,11 @@ with the names of the colliding usable tools and the explicit `/call/<name>/<pat
 Each successful identity dependency commits its read-only transaction before the handler runs, so an
 application use case can open its own session without waiting behind the request's pool slot. The
 dependency-cached session remains usable because every session maker sets `expire_on_commit=False`.
-`require_superadmin` is the one gate on a different pool - it takes `get_admin_session`, and so must
-every `/admin/*` handler under it (FastAPI caches dependencies by identity; see
-[super-admin](../architecture/super-admin.md)).
+`require_superadmin` stays on the admin primary pool through `get_admin_session`, shared with
+primary admin handlers. `/admin/errors` uses `get_admin_read_session` for evidence and org names
+after the gate releases its connection: a configured reader, otherwise the original admin pool.
+It accepts replication lag for the report, never for authorization, and never retries a failed
+reader on the primary (see [super-admin](../architecture/super-admin.md)).
 Authz = org scoping + a role gate: `_can_manage` lets admin/owner manage any org resource, a member only
 what they created; `_require_admin_of` gates the org-admin endpoints. See
 [multi-tenancy](../architecture/multi-tenancy.md).
@@ -395,7 +421,8 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
     virtual-memory cap crashes Go CLIs (gh/stripe/doctl) and `RLIMIT_NPROC` is per-uid, shared with the
     server. Full **filesystem/network** isolation needs a container deploy and is a planned follow-up.
 - **Meta:** `meta` (`GET /meta`, open) → `{public_url, github, google, app_version, treg_version,
-  posthog_key/posthog_host, intercom_app_id, hub, referral}` for the dashboard. `referral` carries the
+  posthog_key/posthog_host, intercom_app_id, hub, referral, paused_providers}` for the dashboard.
+  `paused_providers` is `{service: {display_name, message}}` for `TREG_PAUSED_PROVIDERS`, empty by default. `referral` carries the
   two configured reward amounts so the top-bar entry can name them without `GET /referrals`. `hub`
   is `TREG_HUB_ENABLED`, so the dashboard asks no hub route that could only answer 404. The last three are the opt-in
   third-party keys (analytics, support chat): empty on a deployment that didn't set them, so
@@ -413,7 +440,7 @@ validated before resolving the shared HTTP client. `/auth/logout` remains an HTT
   |---|---|
   | `GET /catalog/platforms` | Non-empty platforms with capability/endpoint counts and providers, ordered by endpoint count; `providers` names every browsable vendor |
   | `GET /catalog/platforms/{slug}` | Capabilities, extended endpoints, dashboard domain rows (a row whose capability at least two providers serve there carries `compare`, its URL key) and provider metadata; an endpoint teams' agents have reviewed carries `reviews` (`architecture/feedback.md`: scored past five teams, quoted as early before), and every endpoint its `observed` calls (the same snapshot search ranks on); unknown slug is 404 |
-  | `GET /catalog/search?q=&limit=` | Ranked endpoint views, count/total and hints; default 25, maximum 100. Listed hub tools merge into the same ranking by score (see [hub](../architecture/hub.md)); a hub row's run hint is its own `treg call <id> --data` line, since it has no catalog row or provider key |
+  | `GET /catalog/search?q=&limit=&added_within_days=&sort=` | Ranked endpoint views, count/total and hints; default 25, maximum 100. Listed hub tools merge into the same ranking by score (see [hub](../architecture/hub.md)); a hub row's run hint is its own `treg call <id> --data` line, since it has no catalog row or provider key. `added_within_days` (1-365, capped above with `capped_at_days`) and `sort=newest` list recently added tools, `q` optional; absent, the answer is unchanged apart from each row's `added` (see [catalog](../architecture/catalog.md)) |
   | `GET /catalog/find?q=` | Find tools for a described job: NDJSON stream of `candidates` then `judged` (verdict + kept rows with probabilities; a bare platform or provider name gets verdict `name` and its endpoints, unjudged; under `find_engine=v2` the recall is by job and the events add `units`, `reason`, `platform`, `engine`, and rows `fit_from` / `children_hidden`, see architecture/find.md); `&platform=<slug>` scopes recall and the keyword fallback (ranked among that shelf's rows, catalog-wide idf) and a bare provider name to that shelf (unknown slug is 404); rate limited per IP, 503 without a judge key |
   | `GET /catalog/providers/{service}` | Every tool one provider serves, by platform; a tool whose capability several providers serve on its platform carries `compare` (capability, URL key, provider count); reviewed endpoints carry `reviews`; unknown provider is 404 |
   | `GET /catalog/endpoints/{id}` | Endpoint, provider, capability siblings (each with `observed` and, where reviewed, `reviews`), call template, inline example and next-step hints; `observed_pending: true` when the observation cache had not read some of these endpoints yet (ask again shortly); `overflow_price_usd` / `overflow_price_unit` / `overflow_via` on the endpoint when the deployment can relay it |

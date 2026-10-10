@@ -13,6 +13,20 @@ from . import paths as P
 
 
 @dataclass(frozen=True)
+class Check:
+    """The opt-in check after a hit (`X-Treg-Route-Verify`): one more call, to `endpoint`, with the
+    hit's `field` as its identity key of the same name. `prefer` orders that call's providers only.
+    `when` is an expression over `{field: value}`; a hit failing it is not checked, for `skip_reason`,
+    and `skip_advice` replaces the find's advice then: the caller already asked for the check."""
+    endpoint: str
+    field: str
+    prefer: tuple[str, ...] = ()
+    when: str = ""
+    skip_reason: str = ""
+    skip_advice: str = ""
+
+
+@dataclass(frozen=True)
 class Contract:
     capability: str
     summary: str
@@ -29,8 +43,7 @@ class Contract:
     # before outreach. Empty = no advice. A search contract has no `verified` output, so advice
     # set there attaches to EVERY hit — deliberate for `people.search`, whose rows carry emails
     # nobody vouched for (2026-09-08: 73 of 79 bounces were unverified directory rows). A
-    # suggestion only: treg never chains the verify call itself, which would double every hit's
-    # price and change what the find bills for.
+    # suggestion only unless the caller asks for the check (`check`, below).
     advice_unverified: str = ""
     # False = the contract exists so the archive can judge found/empty (`results.has_result_rules`
     # needs a verified adapter, and an adapter verifies only against a contract); no
@@ -52,6 +65,13 @@ class Contract:
     verdict_from: str = ""
     verdict_words: tuple[str, ...] = ()
     verdict_map: dict[str, str] = field(default_factory=dict)
+    # The check a caller may ask for with `X-Treg-Route-Verify`; None = the header is refused.
+    check: Check | None = None
+    # True where a 2xx with nothing in it is the provider failing the job, not "no result": an
+    # empty scraped page, an empty results list. Measured success then counts such an answer
+    # against the endpoint (`stats.Tally.fold`), so a provider that answers 200 to everything
+    # cannot rank on a success rate it did not earn.
+    empty_is_failure: bool = False
 
     @property
     def required_output(self) -> tuple[str, ...]:
@@ -189,8 +209,25 @@ def parse_contracts(doc: dict) -> dict[str, Contract]:
             routed=bool(c.get("routed", True)),
             scoping=tuple(str(k) for k in scoping),
             prefer=tuple(str(p).lower() for p in c.get("prefer") or ()),
+            check=_parse_check(cap, c.get("check"), c.get("output") or {}),
+            empty_is_failure=bool(c.get("empty_is_failure", False)),
             **_parse_verdict(cap, c.get("verdict")))
     return out
+
+
+def _parse_check(cap: str, raw, output: dict) -> Check | None:
+    if not raw:
+        return None
+    if not isinstance(raw, dict) or not raw.get("endpoint") or raw.get("field") not in output:
+        raise ValueError(f"contract {cap}: check needs an `endpoint` and a `field` from its output")
+    if bool(raw.get("when")) != bool(raw.get("skip_reason")):
+        raise ValueError(f"contract {cap}: check `when` and `skip_reason` come together")
+    if raw.get("skip_advice") and not raw.get("when"):
+        raise ValueError(f"contract {cap}: check `skip_advice` needs a `when`")
+    return Check(endpoint=str(raw["endpoint"]), field=str(raw["field"]),
+                 prefer=tuple(str(p).lower() for p in raw.get("prefer") or ()),
+                 when=str(raw.get("when") or ""), skip_reason=str(raw.get("skip_reason") or ""),
+                 skip_advice=str(raw.get("skip_advice") or ""))
 
 
 def _parse_verdict(cap: str, raw) -> dict:
@@ -246,7 +283,29 @@ def declared_miss(endpoint: dict, status: int, body: Any) -> bool:
     predicate that raises reads as "not a miss"."""
     if status != miss_status(endpoint):
         return False
-    when = (endpoint.get("miss") or {}).get("when")
+    return _body_matches((endpoint.get("miss") or {}).get("when"), body)
+
+
+def declared_not_found(endpoint: dict, status: int, body: Any) -> bool:
+    """True when a child's answer is the endpoint's declared "the target does not exist" answer
+    (`not_found: {status, when?, means}`): the page or record is gone at its source, so another
+    provider can only find the same nothing, or answer an empty page that looks like a success.
+    `status` is one status or a list (a 2xx is allowed: some providers answer 200 and name the
+    target's 404 in the body); `when` narrows it with a body predicate, as for `miss:`."""
+    nf = endpoint.get("not_found")
+    if not isinstance(nf, dict) or nf.get("status") is None:
+        return False
+    wanted = nf["status"] if isinstance(nf["status"], list) else [nf["status"]]
+    try:
+        if status not in {int(s) for s in wanted}:
+            return False
+    except (TypeError, ValueError):
+        return False
+    return _body_matches(nf.get("when"), body)
+
+
+def _body_matches(when: Any, body: Any) -> bool:
+    """No predicate matches every body; a predicate matches only a JSON object it evaluates true on."""
     if not when:
         return True
     doc = body

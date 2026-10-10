@@ -2,16 +2,13 @@
 import { useDashboard } from '../state/context'
 import AgentCover from '../components/AgentCover.vue'
 import { exampleBanners, exampleIcons } from './getting-started-art'
+import { claudeConnectorLink } from '../agent-setup/data'
 export default {
   components: { AgentCover },
   setup: useDashboard,
-  // Experiment: prompt cards with banners ('test') against text-only cards ('control'). The grid
-  // waits for the variant so no one sees one arm and then the other; without PostHog it is control.
-  data: () => ({ tryArt: '' }),
-  computed: { exampleBanners: () => exampleBanners, exampleIcons: () => exampleIcons },
+  computed: { exampleBanners: () => exampleBanners, exampleIcons: () => exampleIcons, connectorLink: () => claudeConnectorLink(location.origin) },
   mounted(){
     this.loadPlatforms()  // the catalog size in the copy
-    this.featureVariant('getting-started-example-art').then(v => { this.tryArt = v === 'test' ? 'test' : 'control' })
   },
 }
 </script>
@@ -41,6 +38,12 @@ export default {
               </div>
               <div class="start-bd rd-setup-body">
                 <p class="rd-agent-context">Setting up treg for <b>{{welcomeAgent.name}}</b></p>
+                <section v-if="welcomeAgent.connector" class="rd-setup-panel">
+                  <p class="rd-panel-label">Add treg as a connector</p>
+                  <p class="rd-token-help">Open {{welcomeAgent.name}} and add treg. You sign in there, so you need no setup line and no key.</p>
+                  <a class="btn" :href="connectorLink" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;margin:0 0 12px 16px;text-decoration:none" @click="track('onboarding_connector_add_clicked',{agent:welcome.agent,from:'start'})"><img :src="agentIcon(welcomeAgent.icon)" alt="" style="width:16px;height:16px">Add connector in {{welcomeAgent.name}} ↗</a>
+                </section>
+                <template v-else>
                 <template v-if="welcomeAgent.plugin"><p>First, install the treg plugin:</p><a class="btn" :href="welcomeAgent.plugin" target="_blank" rel="noopener" @click="track('onboarding_plugin_install_clicked',{agent:welcome.agent,from:'start'})">Install plugin in {{welcomeAgent.name}} ↗</a></template>
                 <section class="rd-setup-panel">
                   <p class="rd-panel-label">{{welcomeAgent.plugin ? "Then, in your Bot's chat, send:" : "In your agent's chat, send:"}}</p>
@@ -56,6 +59,7 @@ export default {
                   <p class="rd-token-help">This team's Default key is disabled, so it is hidden and cannot be used.</p>
                   <button class="btn sm" @click="enableDefaultKey" :disabled="keyBusy">{{keyBusy?'…':'Enable key'}}</button>
                 </section>
+                </template>
 
               </div>
             </div>
@@ -65,9 +69,9 @@ export default {
             <div class="start-hd"><span class="start-num">2</span><b style="font-size:16px">Try it out</b></div>
             <div class="start-bd">
               <p class="rd-try-intro">Copy an example below and send it to your agent.</p>
-              <div v-if="tryArt" class="try-grid" :data-art="tryArt">
-                <button v-for="ex in tryExamples" :key="ex.k" type="button" class="try-card" :class="['rd-task-'+ex.k, {'rd-try-art':tryArt==='test'}]" @click="track('tryit_prompt_copied',{key:ex.k,cat:ex.cat,from:'getting_started',art:tryArt}); copyStart(ex.prompt,'try-'+ex.k)">
-                  <img v-if="tryArt==='test' && exampleBanners[ex.k]" class="rd-try-banner" :src="exampleBanners[ex.k]" alt="" loading="lazy">
+              <div class="try-grid">
+                <button v-for="ex in tryExamples" :key="ex.k" type="button" class="try-card" :class="['rd-task-'+ex.k, 'rd-try-art']" @click="track('tryit_prompt_copied',{key:ex.k,cat:ex.cat,from:'getting_started'}); copyStart(ex.prompt,'try-'+ex.k)">
+                  <img v-if="exampleBanners[ex.k]" class="rd-try-banner" :src="exampleBanners[ex.k]" alt="" loading="lazy">
                   <span class="rd-try-panel">
                     <span class="try-cat"><span style="display:inline-flex;align-items:center;gap:7px"><img class="try-ico" :src="exampleIcons[ex.k] || '/media/redesign/try-'+({trend:'tiktok',enr:'people',serp:'google',soc:'linkedin',posts:'linkedin'}[ex.k] || 'people')+'.svg'" alt=""/>{{ex.cat}}</span><span class="try-copy" :class="{done:startCopied==='try-'+ex.k}">{{startCopied==='try-'+ex.k ? '✓ copied' : '⧉ copy'}}</span></span>
                     <span class="try-txt">{{ex.show || ex.prompt}}</span>

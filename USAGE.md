@@ -134,7 +134,7 @@ treg tool add google-ads --base-url https://googleads.googleapis.com \
 
 | Command | Options | What it does |
 |---|---|---|
-| `treg catalog search` | `"what you want to do"` | find endpoints by capability |
+| `treg catalog search` | `"what you want to do"`, `--new [DAYS]`, `--sort newest` | find endpoints by capability; `--new` keeps tools added in the last DAYS days (30 when bare, max 365), `--sort newest` lists newest first; with either, the words are optional |
 | `treg catalog get` | `ENDPOINT_ID` | docs, parameters, **the price**, and how you would be served |
 | `treg call ENDPOINT_ID` | `--query K=V`, `--data STR` | call it |
 | `treg --json call ENDPOINT_ID` | same | for scripts: one JSON line `{"result": <body>, "_treg": {http_status, call_id, charged_micro}}` on stdout, nothing on stderr |
@@ -145,6 +145,8 @@ treg tool add google-ads --base-url https://googleads.googleapis.com \
 
 ```bash
 treg catalog search "instagram profile"
+treg catalog search --new                            # tools added in the last 30 days, newest first
+treg catalog search phone --new 60                   # phone tools added in the last 60 days
 treg catalog get tikhub.tiktok.user.profile          # shows the price BEFORE you spend
 treg call tikhub.tiktok.user.profile --query uniqueId=tiktok
 ```
@@ -263,6 +265,26 @@ vendor 4xx is your request's fault and stops. A **miss** tries the next provider
 on by default), cheapest first, within `X-Treg-Route-Max-Cost` (default $1 per call); every
 attempt settles at its real price and misses on per-success providers are free. `X-Treg-Route-Waterfall: 0`
 stops at the first miss. `X-Treg-Route-Prefer` / `X-Treg-Route-Exclude` name providers. A filter the serving provider could not apply is named in `X-Treg-Ignored-Filters` (and `_treg.ignored_filters`); `X-Treg-Route-Strict-Filters: 1` refuses such a call with a 422 (unbilled) instead. Vendor endpoints are still relayed verbatim; only `treg.*` rows model an API.
+
+`X-Treg-Route-Verify: true` on `treg.people.email.find` checks a hit with `treg.people.email.verify`
+in the same call: your own verifier key first, then BounceBan, then the usual order. The check is
+its own call with its own charge, inside the same `X-Treg-Route-Max-Cost`; `X-Treg-Cost-Micro` is
+find plus check. The answer adds `_treg.verification: {verdict, checked, served_by, cost_micro}`
+(`valid` / `invalid` / `catch_all` / `risky` / `unknown`). `checked: false` and a `reason`
+(`no_hit`, `over_cost_limit`, `checker_failed`, `no_checker`, `not_allowed`, `spend_limit`) mean
+no check ran and it cost nothing. A miss is never checked: its reason is `no_hit`. Other routed tools refuse the header (422, unbilled).
+
+On `treg.people.phone.find` the same header checks the line with HLR Lookup's live network lookup
+(`hlrlookup.people.phone.verify`): your own HLR key first, `usa_status` only for `+1` numbers, no
+cache reads. The verdict is `live` / `dead` / `unknown`; a live line is not proof the number is
+this person's (`trestleiq.people.contact.verify` checks a US name). A number not written
+internationally is never sent, because HLR would read its first digits as a country code: reason
+`not_international`, nothing charged.
+
+```bash
+treg call treg.people.email.find --body '{"full_name": "Patrick Collison", "domain": "stripe.com"}' \
+  --header "X-Treg-Route-Verify: true"
+```
 
 When a routed child is asynchronous, treg submits and polls it internally for up to 60 seconds. If
 it is still processing, the route returns HTTP 202 with `_treg.outcome: "pending"`, the child call

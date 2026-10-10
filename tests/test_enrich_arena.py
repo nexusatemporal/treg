@@ -1486,10 +1486,13 @@ async def test_national_phone_verification_preserves_provider_country(clients, e
             await asyncio.wait_for(asyncio.shield(arena._owners[final['id']]), 10)
             final = (await clients.get('/arena/runs/'+final['id'])).json()
     hit = final['results'][0]
-    assert hit['output']['phone'] == phone, 'Keep the provider value as returned'
+    # A US national number gains its +1 (`with_country_code`); anything else stays as returned.
+    shown = '+14155550100' if country == 'US' else phone
+    assert hit['output']['phone'] == shown, 'Keep the provider value as returned'
     if country in ('US','GB'):
         assert hit['verification']['state'] == 'hit'
-        assert seen[1][2] == {'phone':phone.replace(' ','').replace('-',''), 'country_code':country}
+        sent = {'phone':shown} if country == 'US' else {'phone':phone.replace(' ',''), 'country_code':country}
+        assert seen[1][2] == sent, 'an international number needs no country context'
         assert len(seen) == 2
     else:
         assert len(seen) == 1, 'Do not guess US or dispatch an uncheckable number'

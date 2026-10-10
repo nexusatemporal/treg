@@ -2306,7 +2306,7 @@
     },
     "/admin/errors": {
       "get": {
-        "description": "Failed calls with the evidence to explain them — the caller's request and the provider's own\nanswer (see models.CallRecord.error_request).\n\nSuperadmin-only and deliberately not mirrored on `/calls`: the rows hold customers' request\ncontent, so v1 keeps them behind the same door as every other cross-tenant view.\n\nRead-only. Ageing is the `treg-worker admin purge-evidence` cron's job\n(application/evidence_retention.py); until it has run, a row older than the window is shown as\nexpired with no evidence, so a late schedule never widens what this view reveals.",
+        "description": "Failed calls with the evidence to explain them — the caller's request and the provider's own\nanswer (see models.CallRecord.error_request).\n\nSuperadmin-only and deliberately not mirrored on `/calls`: the rows hold customers' request\ncontent, so v1 keeps them behind the same door as every other cross-tenant view.\n\nRead-only. Ageing is the `treg-worker admin purge-evidence` cron's job\n(application/evidence_retention.py); until it has run, a row older than the window is shown as\nexpired with no evidence, so a late schedule never widens what this view reveals.\nEvidence and org names may lag when a read database is configured; authorization stays on\nthe primary.",
         "operationId": "admin_errors_admin_errors_get",
         "parameters": [
           {
@@ -3408,6 +3408,69 @@
           }
         },
         "summary": "Admin Referrals"
+      }
+    },
+    "/admin/share": {
+      "get": {
+        "description": "Who served each job over the last `minutes` (at most 360). `requests` counts what callers\nasked (direct calls and routed parents, never a routed attempt). `by_provider` credits the\nanswer a caller actually got: a direct call's 2xx that its adapter did not judge a miss\n(`CallRecord.hit` False), and, for a routed call, only the LAST attempt of a parent that\nsucceeded - the attempt whose answer the job returned. An earlier attempt the job moved on\nfrom is not credited, whatever its status: a free provider's body is often streamed without\na `hit` verdict, so its empty 200s would otherwise count. Two reads over an id range.\n\n`teams` counts the same answers per team, so one heavy team cannot stand for the market:\n`total` teams with an answer, `by_provider` teams a provider served, `weighted` each\nprovider's share averaged over teams (every team one vote), and `direct` / `routed` the same\nteam counts for calls that named a provider and for calls treg's job served.",
+        "operationId": "admin_share_admin_share_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "minutes",
+            "required": false,
+            "schema": {
+              "default": 60,
+              "title": "Minutes",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-treg-token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Treg-Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "treg_session",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Treg Session",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Admin Share Admin Share Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Share"
       }
     },
     "/admin/stats": {
@@ -6192,7 +6255,7 @@
     },
     "/catalog/search": {
       "get": {
-        "description": "Open: free-text search across the whole catalog — the DISCOVER half of the loop.\n\nAn agent that knows what it wants (\"tiktok comments\") shouldn't have to guess which platform\nshelf hides it. Ranking is plain token matching (see `catalog_store.search`) so results are\nreproducible and explainable; equal scores — the common case, not the edge — then break on what\ntreg has MEASURED and on price, so the cut stops being file order. `hints` carries the next\ncommand, since finding the endpoint is never the goal — inspecting or calling it is.",
+        "description": "Open: free-text search across the whole catalog — the DISCOVER half of the loop.\n\nAn agent that knows what it wants (\"tiktok comments\") shouldn't have to guess which platform\nshelf hides it. Ranking is plain token matching (see `catalog_store.search`) so results are\nreproducible and explainable; equal scores — the common case, not the edge — then break on what\ntreg has MEASURED and on price, so the cut stops being file order. `hints` carries the next\ncommand, since finding the endpoint is never the goal — inspecting or calling it is.\n\n`added_within_days` and `sort=newest` (catalog.md \"`added`\") list recently added tools, with or\nwithout words; absent, this route answers exactly as it did before them.",
         "operationId": "catalog_search_catalog_search_get",
         "parameters": [
           {
@@ -6213,6 +6276,32 @@
               "default": 25,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "added_within_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Added Within Days"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Sort",
+              "type": "string"
             }
           }
         ],

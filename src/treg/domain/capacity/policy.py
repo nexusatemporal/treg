@@ -3,7 +3,7 @@ that turns the latest snapshot into a served/exhausted state."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +37,7 @@ _KNOWN: dict[str, tuple[str, str, str]] = {
     "thecompaniesapi": ("credits", "manual", "api"),
     "tomba": ("monthly_quota", "quota_reset", "api"),
     "hunter": ("monthly_quota", "quota_reset", "api"),
-    "quickenrich": ("monthly_quota", "quota_reset", "api"),
+    "quickenrich": ("monthly_quota", "quota_reset", "none"),
     "prospeo": ("monthly_quota", "quota_reset", "api"),
     "aiark": ("monthly_quota", "quota_reset", "api"),
     "wiza": ("credits", "manual", "api"),
@@ -51,6 +51,8 @@ _KNOWN: dict[str, tuple[str, str, str]] = {
     "search1api": ("credits", "auto_recharge", "api"),
     "octen": ("cash", "manual", "manual"),
     "linkup": ("cash", "manual", "api"),
+    # The balance route needs an Account API OAuth token, not the API key treg holds.
+    "parallel": ("cash", "manual", "manual"),
     "you": ("cash", "auto_recharge", "api"),
     "valyu": ("credits", "subscription", "manual"),
     # The API supplies the exact credit balance; vendor auto recharge was manually enabled and
@@ -160,6 +162,9 @@ _RATE_LIMITS: dict[str, dict] = {
     # endpoint-specific Extract URL limits remain enforced by Octen.
     "octen": {"limit": 5, "window_s": 1, "source": "policy"},
     "linkup": {"limit": 10, "window_s": 1, "source": "docs"},
+    # Search, Extract and Entity Search each allow 600 requests a minute. Smoothing is
+    # provider-wide, so the shared key stays at one product's allowance.
+    "parallel": {"limit": 600, "window_s": 60, "source": "docs"},
     # Finance Research is 5/s; the other You.com APIs are 10/s. Smoothing is provider-wide.
     "you": {"limit": 5, "window_s": 1, "source": "docs"},
     # GET /account reports 50 queries/s for the current shared account. Pace the platform key to

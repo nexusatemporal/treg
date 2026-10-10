@@ -7,6 +7,8 @@ sources:
   - src/treg/domain/catalog/results.py
   - src/treg/alembic/versions/0031_archive_result_admission.py
   - tests/test_cache_result_admission.py
+  - tests/test_archive_batch.py
+  - tests/test_archive_batch_postgres.py
   - src/treg/archive_bodies.py
   - src/treg/config.py
   - src/treg/infra/object_store.py
@@ -182,9 +184,18 @@ a billed call like any other and counts.
 
 The evidence is `ArchiveKeyOrg` — one row per (org, key_hash), written by
 `archive.note_org_use_in_transaction` INSIDE the settle transaction (`_platform_settle`, the
-allowlisted write `archive_org_use_in_settle`), so the mark lands with the charge or not at all;
-a racing pair of first calls is confined to a savepoint, and an IntegrityError that leaves no row
-to count is re-raised rather than swallowed. Only a STORABLE question is marked: `record()` hands
+allowlisted write `archive_org_use_in_settle`), so the mark lands with the charge or not at all.
+`note_org_uses_in_transaction` folds repeated keys into counts and writes bounded batches in
+`(org_id, key_hash)` order; `close_deferred` passes all its marks together, and the single-mark
+entry uses the same writer. PostgreSQL and SQLite use an atomic upsert against that pair's unique
+constraint: a conflict increments `calls` and updates `last_call_at`, preserving `first_call_at`.
+Each batch uses one timestamp. PostgreSQL reuses an existing mark's immutable ID through an
+in-statement lookup, allocating a sequence value only when that statement's snapshot has no row;
+concurrent first inserts can still leave sequence gaps. The unique constraint, not the lookup,
+arbitrates concurrent counting. Returned rows refresh any marks already loaded in the session.
+All chunks remain in the caller's transaction; a genuine write error propagates so both charges
+and marks roll back. This reduces database round trips while money row locks remain held.
+Only a STORABLE question is marked: `record()` hands
 back a hash for every metered 2xx (the phase-0 statistics count actions and forbidden providers
 too), and a mark for an answer that can never be a hit is a wasted write on the money path. `lookup` reads it on a hit
 (`repeat_for_org`), the call service hands `cached_hit`/`cached_repeat` to the settle, which

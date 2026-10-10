@@ -27,14 +27,14 @@ export default { components: { BrandMark, TregAgentPicker, TregSetupInstructions
             </div>
           </template>
           <template v-else-if="welcome.step===2">
-            <treg-setup-instructions :agent="welcomeAgent" :icon="agentIcon" :command="welcomeSetupCmd" :team="activeSlugNow || '<team-slug>'" :token="myToken" :show-token="startTokenShow" :copied="startCopied==='wc'" @copy="copyStart($event,'wc')" @toggle-token="startTokenShow=!startTokenShow" @plugin="track('onboarding_plugin_install_clicked',{agent:welcome.agent})"></treg-setup-instructions>
+            <treg-setup-instructions :agent="welcomeAgent" :icon="agentIcon" :command="welcomeSetupCmd" :team="activeSlugNow || '<team-slug>'" :token="myToken" :show-token="startTokenShow" :copied="startCopied==='wc'" @copy="copyStart($event,'wc')" @toggle-token="startTokenShow=!startTokenShow" @plugin="track('onboarding_plugin_install_clicked',{agent:welcome.agent})" @connector="track('onboarding_connector_add_clicked',{agent:welcome.agent})"></treg-setup-instructions>
             <div class="wc-foot">
               <a href="#" class="sub" @click.prevent="welcome.step=1">← Back</a>
               <button class="btn primary" @click="welcome.step=3">Next →</button>
             </div>
           </template>
           <template v-else>
-            <treg-try-it-out :copied="startCopied.startsWith('wtry-')?startCopied.slice(5):''" @example="track('tryit_prompt_copied',{key:$event.k,cat:$event.cat,from:'onboarding'}); copyStart($event.prompt,'wtry-'+$event.k)" @provider="welcomeTryProvider"></treg-try-it-out>
+            <treg-try-it-out :providers="providers" :copied="startCopied.startsWith('wtry-')?startCopied.slice(5):''" @example="track('tryit_prompt_copied',{key:$event.k,cat:$event.cat,from:'onboarding'}); copyStart($event.prompt,'wtry-'+$event.k)" @provider="welcomeTryProvider"></treg-try-it-out>
             <div class="wc-foot">
               <a href="#" class="sub" @click.prevent="welcomeFinish">Skip</a>
               <button class="btn primary" @click="track('tryit_browse_catalog',{from:'onboarding'}); welcome.on=false; go('catalog')">Browse all catalog →</button>

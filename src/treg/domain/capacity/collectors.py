@@ -401,23 +401,6 @@ async def _dropleads(c, key):
     }
 
 
-async def _quickenrich(c, key):
-    # Free discovery carries the remaining subscription allowance; no account endpoint exists.
-    r = await c.post("https://app.quickenrich.io/api/employees/contact-finder",
-                     headers={"Authorization": f"Bearer {key}"},
-                     json={"company_url": {"include": ["treg-probe-nonexistent.invalid"], "exclude": []},
-                           "per_page": 1})
-    r.raise_for_status()
-    doc = r.json()
-    meta = doc.get("meta") if isinstance(doc, dict) else None
-    remaining = meta.get("remaining_credits") if isinstance(meta, dict) else None
-    # Missing or unclear allowance data is unknown, never evidence of an unlimited plan.
-    if not isinstance(doc, dict) or doc.get("success") is not True or type(remaining) is not int or remaining < 0:
-        return {"value": None, "unit": "credits", "note": "No finite subscription allowance reported; check QuickEnrich plan"}
-    return {"value": remaining, "unit": "credits",
-            "note": "Subscription allowance; resets at renewal, no auto-top-up. Reset date not reported."}
-
-
 async def _prospeo(c, key):
     d = await _get(c, "https://api.prospeo.io/account-information",
                    headers={"X-KEY": key})
@@ -993,7 +976,6 @@ BALANCE_ROUTES = {
     "hunter": _hunter,
     "harvestapi": _harvestapi,
     "fetchinio": _fetchinio,
-    "quickenrich": _quickenrich,
     "prospeo": _prospeo,
     "aiark": _aiark,
     "wiza": _wiza,
@@ -1020,8 +1002,14 @@ BALANCE_ROUTES = {
 # obtain. Kept explicit so the report names them instead of silently skipping, and so a future probe
 # has a list of what to re-check.
 NO_BALANCE_API = {
+    "quickenrich": "no balance endpoint, and no response carries the allowance any more: a free "
+                   "Contact Finder miss or hit and a billed employee search all return a meta without "
+                   "remaining_credits (or no meta), despite the published docs; the subscription "
+                   "allowance is visible in the QuickEnrich dashboard only",
     "octen": "no account balance or usage endpoint in the published OpenAPI; "
              "PAYG USD balance and usage are visible in the provider dashboard",
+    "parallel": "GET /account/service/v1/balance needs an Account API OAuth access token, "
+                "not an API key; the USD balance is visible in the Parallel Platform",
     "valyu": "no documented API endpoint for remaining credits or account usage; "
              "the subscription balance is visible in Valyu's dashboard",
     "perplexity": "no API credit-balance endpoint in the published API reference; "

@@ -180,6 +180,7 @@ Start from the job, not the vendor:
 
     treg catalog                                    # every platform, busiest first
     treg catalog search "backlinks for a domain"    # find endpoints by what they DO
+    treg catalog search --new                       # tools added in the last 30 days, newest first
     treg catalog get tikhub.tiktok.user.profile     # docs, params, PRICE, and how you'd be served
     treg call tikhub.tiktok.user.profile --query uniqueId=tiktok
     # raw HTTP: GET {BASE}/call/tikhub.tiktok.user.profile?uniqueId=tiktok  + X-Treg-Token
@@ -268,8 +269,17 @@ the hub is off on this registry the ids answer 404: use the routed endpoints bel
 <!--/hub-->
 
 <!--routed-->
-**Routed endpoints — when you WANT treg to choose.** `treg.<capability>` rows (today:
-`treg.people.email.find`) are first-party endpoints generated from the providers of one capability.
+**For a common job, call the routed tool, not a provider you remember.** Scraping a page
+(`treg.web.extract`), web search (`treg.web.search`), Google results (`treg.google.serp.organic`,
+`treg.google.serp.maps`), finding or verifying an email (`treg.people.email.find`,
+`treg.people.email.verify`) and most social profiles have a `treg.<capability>` tool. treg picks the
+provider (your own key first), falls back when one fails or misses, and charges only the answer it
+returns. A provider you used last week may not be the best choice today: prices and reliability
+change. Name a provider only when you need fields or options that only it has.
+
+**Routed endpoints — when you WANT treg to choose.** `treg.<capability>` rows (for example
+`treg.web.extract`, `treg.web.search`, `treg.google.serp.organic`, `treg.people.email.find`) are
+first-party endpoints generated from the providers of one capability.
 `POST /call/treg.people.email.find` with `{full_name, domain}` (or `first_name`+`last_name`+`domain`,
 or `linkedin_url`) and treg runs the best child — your own keys first, then cheapest per hit — and
 answers `{output, raw, _treg: {served_by, tried, charged_micro}}` with `X-Treg-Served-By`. A
@@ -289,6 +299,22 @@ A found contact is not a confirmed one: an email or phone find is the provider's
 only `output.verified: true` means it checked the mailbox. Otherwise the answer carries
 `_treg.advice` naming the verify step (`treg.people.email.verify`, a fraction of a cent) — run it
 before outreach, and never re-send the same find: every hit bills, repeats included.
+Send `X-Treg-Route-Verify: true` on `treg.people.email.find` and treg checks every hit with
+`treg.people.email.verify` in the same call (your own verifier key first, then BounceBan), as its
+own charge inside `X-Treg-Route-Max-Cost`. The answer adds `_treg.verification: {verdict, checked,
+served_by, cost_micro}`, `verdict` one of `valid`, `invalid`, `catch_all`, `risky`, `unknown`.
+`checked: false` with a `reason` means no check ran and cost nothing; `pending: true` means the
+verifier is still working (its `call_id` is the async task). An invalid address is still returned,
+with its verdict. A miss is never checked (`checked: false`, `reason: no_hit`). Other routed tools refuse the header (422, unbilled).
+On `treg.people.phone.find` the same header checks the line with HLR Lookup's live network lookup
+(`hlrlookup.people.phone.verify`, your own HLR key first): `verdict` is `live`, `dead` or
+`unknown`. A live line is not proof the number is this person's; for a US number,
+`trestleiq.people.contact.verify` checks the name. A number not written internationally (`+` or
+`00` first) is not checked: `reason: not_international`, nothing charged, and `_treg.advice` says
+how to check it yourself (add the country code, or call `hlrlookup.people.phone.verify` with
+`input_format`, the ISO3 country code). treg adds `+1` to a bare
+10-digit number only when the provider itself marks it US or Canadian. A dead number is still
+returned, with its verdict.
 <!--hub-->
 `treg-hub.verified-email` does find + verify in one call and bills its fee only on a usable email.
 <!--/hub-->
@@ -388,6 +414,9 @@ Money notes for agents:
   when known and `alternatives` — other providers for the same capability; pick one, or use
   your own key for the provider (never affected). treg does not switch providers for you.
   treg re-checks the provider about once a minute, so a retry after a minute can succeed.
+- HTTP **503** with `error: provider_paused` → this treg deployment has paused that provider
+  (nothing charged, nothing sent to it). The `message` says why. Its endpoints are out of search
+  and the team's existing connection is kept; do not reconnect, it works again when resumed.
 - `treg balance` shows the prepaid balance and recent charges; the dashboard Activity page
   shows the exact settled cost of every call.
 
@@ -585,7 +614,10 @@ A small tool set, the same for every client:
 job ranked by measured success (a provider or platform name lists what it offers). Read its
 `verdict`: `strong` means these do the job; `closest` means the nearest, read `catalog_get`
 before relying on one; `none` means the catalog has no tool for it, so file `catalog_request`
-instead of rephrasing; `keyword` means ranked by words alone.
+instead of rephrasing; `keyword` means ranked by words alone. To see recently added tools, give
+`catalog_search` `added_within_days` (1-365; 30 is a good default) and/or `sort: "newest"`; with
+either, `query` may be empty and the answer is a flat list of tools, each with its `added` day
+(UTC) and provider. Every result also carries `added`.
 <!--hub-->
 - `hub_create` · `hub_update` · `hub_mine` — publish a tool made of tools (the four files as fields; the check runs once on your balance; live on pass).
 <!--/hub-->

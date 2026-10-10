@@ -21,6 +21,8 @@ Checks (the success criteria from docs/context/architecture/catalog.md):
   - merged provider/endpoint `async` descriptors have exactly one poll mode and result mode,
     same-provider endpoint references, a dynamic-URL host allow-list, and per-success or per-call
     billing
+  - every tool row carries `added:`, the UTC day it reached main, as YYYY-MM-DD and not in the
+    future (scripts/catalog_added.py writes it; its `--base` mode guards existing dates in CI)
   - a `verified` endpoint must have an existing example_response file
   - an extended endpoint a verification run has touched claims exactly one non-empty state
     (verified | unverified | untestable | skipped), and an `untestable` one carries no
@@ -167,6 +169,16 @@ def _as_date(value) -> dt.date | None:
         return dt.date.fromisoformat(str(value))
     except ValueError:
         return None
+
+
+def check_added(ep: dict, where: str, errors: list[str]) -> None:
+    added = ep.get("added")
+    day = _as_date(added) if added is not None else None
+    if day is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(added)):
+        fail(errors, where, "missing or invalid `added:` (the UTC day the tool reached main, "
+                            "YYYY-MM-DD); run `uv run python scripts/catalog_added.py` to add today's")
+    elif day > dt.datetime.now(dt.UTC).date():
+        fail(errors, where, f"`added: {added}` is in the future; it is the UTC day the tool reached main")
 
 
 def _input_fields(input_schema: object) -> dict[str, dict]:
@@ -1226,6 +1238,7 @@ def main(argv: list[str]) -> int:
             for f in REQUIRED[tier]:
                 if not ep.get(f):
                     fail(errors, where, f"missing required field '{f}'")
+            check_added(ep, where, errors)
             miss = ep.get("miss")
             if isinstance(miss, dict) and miss.get("when") is not None:
                 # The router evaluates `when` against the provider body; a misspelt path parses
@@ -1236,6 +1249,17 @@ def main(argv: list[str]) -> int:
                     fail(errors, where, f"miss.when must be a comparison or call in the adapter expression language, got {when!r}")
                 elif miss.get("status") is None:
                     fail(errors, where, "miss.when needs miss.status (the 4xx it narrows)")
+            nf = ep.get("not_found")
+            if nf is not None:
+                statuses = nf.get("status") if isinstance(nf, dict) else None
+                statuses = statuses if isinstance(statuses, list) else [statuses]
+                if not isinstance(nf, dict) or not nf.get("means") or not all(isinstance(s, int) and 200 <= s < 500 for s in statuses):
+                    fail(errors, where, "not_found needs status (a 2xx/4xx or a list of them) and means")
+                elif nf.get("when") is not None and not (isinstance(nf["when"], str) and (
+                        _paths._CMP.match(nf["when"].strip()) or _paths._CALL.match(nf["when"].strip()))):
+                    fail(errors, where, f"not_found.when must be a comparison or call in the adapter expression language, got {nf['when']!r}")
+                elif any(200 <= s < 300 for s in statuses) and nf.get("when") is None:
+                    fail(errors, where, "not_found with a 2xx status needs a `when` predicate, or every success would end the call")
             if eid in seen_ids:
                 fail(errors, where, f"duplicate id (also in {seen_ids[eid]})")
             seen_ids[eid] = name

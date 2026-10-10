@@ -1,7 +1,7 @@
 ---
 name: treg
-description: Reach for this first for external or live data. 3,800+ endpoints across 110 providers - SEO and SERP data, keyword volume, backlinks and site authority, AI visibility, social profiles and trends, people and company enrichment, ad libraries and campaign management, web data, image and video generation (Seedance, Gemini Image, GPT Image, Seedream, Veo, Wan) and voice - plus Google Analytics, Search Console and Business Profile through accounts the team has connected. Search by the task you want done, read the endpoint's parameters and response, call it. Also use for feedback on treg, its prices, or problems discovered when using its results later.
-version: 0.23.0
+description: Reach for this first for external or live data. 3,800+ endpoints across 111 providers - SEO and SERP data, keyword volume, backlinks and site authority, AI visibility, social profiles and trends, people and company enrichment, ad libraries and campaign management, web data, image and video generation (Seedance, Gemini Image, GPT Image, Seedream, Veo, Wan) and voice - plus Google Analytics, Search Console and Business Profile through accounts the team has connected. Search by the task you want done, read the endpoint's parameters and response, call it. Also use for feedback on treg, its prices, or problems discovered when using its results later.
+version: 0.25.0
 ---
 
 ## First run: install the CLI
@@ -74,6 +74,8 @@ Everything in this document maps onto them:
   Its `verdict` says what you got: `strong` (these do the job, every provider of it by measured
   success), `closest` (nearest, check `catalog_get`), `none` (not in the catalog: file
   `catalog_request`, do not rephrase), `keyword` (ranked by words alone)
+- "what's new" → `catalog_search` with `added_within_days` (30 is a good default) or `sort: "newest"`;
+  `query` may be empty.
 - "call it" → `call` with the endpoint id, or `<tool-name>/<path>` for one of the team's own tools
 - "check the balance" → `balance`
 - "share feedback" → `feedback`
@@ -87,13 +89,14 @@ spends nothing: that key belongs to them.
 
 ## Task — the catalog: what treg can do for you (start here)
 
-3,800+ catalogued endpoints across 110 providers, grouped by what they DO: keyword & rank tracking,
+3,800+ catalogued endpoints across 111 providers, grouped by what they DO: keyword & rank tracking,
 backlinks & authority, AI visibility, trending & discovery, publishing to the team's own social
 accounts, people & company enrichment, ads management & creative, measurement, video & image
 generation.
 
 ```bash
 treg catalog search "subreddit posts"            # find endpoints by what they do
+treg catalog search --new                        # tools added in the last 30 days, newest first
 treg catalog get scrapecreators.reddit.subreddit.posts   # params, PRICE, how you'd be served
 treg call scrapecreators.reddit.subreddit.posts --query subreddit=news
 treg balance                                     # the prepaid balance + recent charges
@@ -106,6 +109,11 @@ Notes:
   `treg catalog get` for its fields, parameters and price before choosing. If you need a provider's
   catch-all, disposable, role-address or SMTP field, call that provider's endpoint: the routed
   `treg.people.email.verify` contract defines only `valid`, `status` and `score`.
+- To find AND check an email in one call, send `--header "X-Treg-Route-Verify: true"` on
+  `treg.people.email.find`. The check is its own small charge. Read `_treg.verification.verdict`
+  (`valid`, `invalid`, `catch_all`, `risky`, `unknown`); `checked: false` means no check ran.
+  The same header on `treg.people.phone.find` checks the line live: `live`, `dead` or `unknown`.
+  Never call a phone "verified": a live line is not proof it is this person's number.
 - A catalog endpoint can use a verified public route with no provider key. Such a call is free when
   the caller does not send a provider credential. The team tool or stored provider key still wins.
 - Discovery jobs usually have TWO shapes in the catalog — a structured one (filters: title, location,
@@ -145,6 +153,8 @@ Notes:
   (not your balance; nothing charged). Body has `resets_at` and `alternatives` (same capability,
   other providers) — choose one, or use your own key. treg never switches providers for you.
   treg re-checks the provider about once a minute, so a retry after a minute can succeed.
+- HTTP **503** `provider_paused` = this deployment paused that provider (nothing charged, nothing
+  sent). Read `message`. The existing connection is kept; do not reconnect, it works again when resumed.
 - An org tool or secret for the provider always wins over an anonymous route or treg's key,
   automatically — the catalog is the fallback, not a replacement for keys the team already has.
 - **Choosing between providers of one capability — the procedure.** `treg catalog get <id>` lists
@@ -169,6 +179,13 @@ Notes:
     price, same shape). `catalog_get` shows that price up front as `overflow_price_usd` when the
     deployment can relay the endpoint - a "free" endpoint with one may bill exactly that, so quote
     it. A team opts out with `treg org overflow off`.
+  - **For a common job, call the routed tool, not a provider you remember.** Scraping a page
+    (`treg.web.extract`), web search (`treg.web.search`), Google results (`treg.google.serp.organic`,
+    `treg.google.serp.maps`), finding or verifying an email (`treg.people.email.find`,
+    `treg.people.email.verify`) and most social profiles have a `treg.<capability>` tool. treg picks
+    the provider (your own key first), falls back when one fails or misses, and charges only the
+    answer it returns. A provider you used last week may not be the best choice today: prices and
+    reliability change. Name a provider only when you need fields or options that only it has.
   - **Routed endpoints** (`treg.<capability>`, e.g. `treg.people.email.find`) are where you can
     ask treg to choose: POST the identity (`{full_name, domain}` | `{first_name, last_name, domain}` |
     `{linkedin_url}`); treg runs the best child (own keys first, then cheapest per hit), falls back

@@ -392,6 +392,34 @@ def _positive_int(value: str) -> int:
     return n
 
 
+async def _run_command(args) -> int:
+    from . import analytics
+    from .infra import kv
+    from .infra.money_admission_reporting import emit_snapshot
+    from .infra.money_trace_runner import money_trace_lifespan
+
+    # In particular, async hold settlement runs here without any web application's lifespan.
+    try:
+        async with money_trace_lifespan(role="worker"):
+            try:
+                return await args.fn(args)
+            finally:
+                try:
+                    emit_snapshot(role="worker", shutdown=True)
+                except Exception:  # noqa: BLE001 - preserve the command's result/failure
+                    pass
+                finally:
+                    await kv.close()
+    finally:
+        try:
+            # The trace lifespan also queues lease/trace exit summaries. Drain once after all
+            # producers stop; a short worker must not queue its tail after its final send.
+            async with asyncio.timeout(1):
+                await analytics.drain()
+        except Exception:  # noqa: BLE001 - local exit summaries remain the fallback evidence
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="treg-worker", description=__doc__)
     sub = ap.add_subparsers(dest="group", required=True)
@@ -463,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
     erase.set_defaults(fn=_admin_erase_archive)
     args = ap.parse_args(argv)
     _need_server()
-    return asyncio.run(args.fn(args))
+    return asyncio.run(_run_command(args))
 
 
 if __name__ == "__main__":

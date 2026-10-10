@@ -58,6 +58,7 @@ from .resolve import (
     _oauth_billed_provider,
     _request_body_document,
     _resolve_call,
+    provider_paused,
     resolve_call_target,
     resolve_marketplace_target,
 )
@@ -820,6 +821,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             # still leave a trace — it's exactly the row the caller will come asking about.
             request.state.call_audited = True
             refused = ("capacity" if mkexc.kind == "provider_capacity"
+                       else "paused" if mkexc.kind == "provider_paused"
                        else _refusal_kind(mkexc.status_code))
             audit.record_call(
                 org_id=caller.org_id, user_email=caller.email, tool_name=ep["id"],
@@ -1038,6 +1040,13 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
     except CallFailure as exc:
         _audit(exc.status_code, refused_by=_refusal_kind(exc.status_code))  # the attempt is a record too
         raise
+    # A connection of a paused provider (TREG_PAUSED_PROVIDERS) is kept but not used: its own tool
+    # and a URL passthrough to its hosts resolve to the tool bound to it. Refused here, before the
+    # money gate and before a token refresh or the relay could reach the provider.
+    paused = next((s.provider for s in secrets.values() if oauth_providers.is_paused(s.provider)), None)
+    if paused is not None:
+        _audit(503, refused_by="paused", answered=False)
+        raise provider_paused(paused)
     billed_provider = _oauth_billed_provider(secrets)
     if billed_provider is not None:
         # The sandbox never reaches here (it returned above); the public demo could, and one shared
