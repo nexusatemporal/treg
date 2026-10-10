@@ -1156,13 +1156,29 @@ def _haystacks(ep: dict, cat: Catalog) -> list[tuple[int, str]]:
     ]
 
 
+_CJK = re.compile(r"[\u3400-\u9fff]")
+
+
+def _padded(text: str) -> str:
+    """A haystack as space-separated words with a leading space, so a word can be matched at its start."""
+    return " " + _SPLIT.sub(" ", text.lower())
+
+
+def _needles(variants: list[str]) -> list[str]:
+    """Each variant as it must appear at the START of a word: " search" matches "search" and
+    "searches", never "research" (2026-10-10: a research-task status row tied with every search
+    tool on "web search" and its measured success put it first). CJK has no spaces between words,
+    so a CJK variant keeps matching anywhere."""
+    return [v if _CJK.search(v) else " " + _SPLIT.sub(" ", v.lower()).strip() for v in variants]
+
+
 def _search_fields(cat: Catalog) -> list[tuple[dict, list[tuple[int, str]]]]:
     """Every endpoint's weighted haystacks, built once per Catalog instance — search runs two
     passes (document frequency, then scoring) and rebuilding the joined strings per query per
-    pass was the only real cost in either."""
+    pass was the only real cost in either. Stored word-padded (`_padded`)."""
     cached = cat._search_fields
     if cached is None:
-        cached = [(ep, _haystacks(ep, cat)) for ep in cat.endpoints]
+        cached = [(ep, [(w, _padded(text)) for w, text in _haystacks(ep, cat)]) for ep in cat.endpoints]
         object.__setattr__(cat, "_search_fields", cached)  # frozen dataclass, deliberate
     return cached
 
@@ -1183,7 +1199,7 @@ def _match(query: str, cat: Catalog):
     tokens = [t for t in raw if t not in _STOPWORDS and len(t) > 1] or raw
     if not tokens:
         return None
-    variants = [[tok, *cat.aliases.get(tok, ())] for tok in tokens]
+    variants = [_needles([tok, *cat.aliases.get(tok, ())]) for tok in tokens]
     # A token that IS a platform slug ("tiktok", "linkedin") is the caller's hard filter, but idf
     # prices it low — half the catalog serves the big platforms — so rows matching a rarer facet
     # word ("followers") outranked rows matching the asked-for platform. Double the weight where a
@@ -1300,10 +1316,11 @@ def score_extra(query: str, cat: Catalog,
     if m is None or not extra:
         return []
     tokens, _rows, _best, idf, required, need = m
-    variants = [[tok, *cat.aliases.get(tok, ())] for tok in tokens]
+    variants = [_needles([tok, *cat.aliases.get(tok, ())]) for tok in tokens]
     boost = [2 if tok in cat.platforms else 1 for tok in tokens]
     out: list[tuple[dict, float]] = []
     for ep, fields in extra:
+        fields = [(w, _padded(text)) for w, text in fields]
         per_tok = [b * max((w for w, text in fields if any(v in text for v in vs)), default=0)
                    for vs, b in zip(variants, boost)]
         if sum(1 for i in required if per_tok[i]) < need:
