@@ -484,3 +484,23 @@ def test_an_error_named_inside_a_200_is_a_miss_for_the_hit_verdict():
     assert classify("tinyfish.web.fetch", 200, page).hit is None
     assert Result("error", "http_error").hit is None           # a failed call has no verdict
     assert Result("found", "adapter_hit").hit is True and Result("empty", "adapter_miss").hit is False
+
+
+def test_every_strict_capability_tool_on_treg_key_has_a_verified_empty_rule():
+    """`empty_is_failure` judges an answer only through the endpoint's verified adapter `miss`. A
+    scrape, search or Google organic tool served on treg's key without one would keep counting its
+    empty 200s as successes while every covered provider counts them as failures: the measured
+    success rate, and the ranking it drives, would favour the provider nobody judged. Tools that
+    treg's key cannot call are judged for nobody (an own key's body is not read), so they are exempt."""
+    from treg.domain.catalog import store as catalog_store
+    cat = catalog_store.load()
+    unjudged = []
+    for ep in cat.endpoints:
+        if ep.get("kind") == "routed" or not catalog_store.empty_is_failure(ep["id"]):
+            continue
+        if not cat.platform_eligible(ep):
+            continue
+        adapter = cat.adapters.get(ep["id"])
+        if adapter is None or not adapter.verified or not adapter.miss.strip():
+            unjudged.append(ep["id"])
+    assert unjudged == [], f"add a verified adapter (route: false if it must not route) for {unjudged}"
