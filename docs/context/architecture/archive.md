@@ -28,6 +28,9 @@ sources:
   - src/treg/bootstrap.py
   - src/treg/routers/admin.py
   - src/treg/application/asynctasks.py
+  - src/treg/application/archive_erasure.py
+  - src/treg/alembic/versions/0067_org_archive_opt_out.py
+  - tests/test_archive_opt_out.py
 related:
   - architecture/data-model.md
   - architecture/proxy-model.md
@@ -114,6 +117,59 @@ header, refuses any value but `public`, and refuses it on an `own_account` endpo
 this endpoint's answer is identical whoever asks — treg's own service OAuth reading public data
 is the intended case — and it is judged per endpoint, never inherited from a provider's licence.
 Nothing in the shipped catalog declares it yet.
+
+### Opting out: a team that wants nothing stored
+
+A team admin can take the team out of the archive (`PATCH /orgs/{id}/settings {"archive":
+false}`, `treg org archive off`, the Team page). The setting is `Org.archive_opt_out_at`
+(migration 0067): a timestamp, not a flag, because the moment the team objected is the
+processing record a data-protection request asks for. It is carried onto the call runtime's
+`OrgSnapshot`, so the gate costs no query.
+
+The gate is a full bypass, on every tier: `_execute_call` makes no lookup and no recording for
+an opted-out team, metered or own key, so no key hash reaches the settle and no `ArchiveKeyOrg`
+mark is written. The team is never served a public answer either, even though serving one would
+store nothing of theirs: a hit touches the key's demand and marks the team against the question,
+and the simplest promise is "we do not record what you asked". The cost is the team's: every call
+is live at the live price, no free own-key hit, no repeat price. `cache_outcome` on
+`tool_called` reads `org_opt_out`. A call in flight at the moment of the opt-out finishes as it
+began, so a recording from it may still land; that is the switch doing exactly what it says
+(nothing NEW is stored from now on), and erasure is what removes the rest.
+
+**Erasure is a separate act, never a side effect of the switch.** Two things run it: deleting
+the team, and `treg-worker admin erase-archive --org <id>` when a team asks for its stored
+answers to go (`application/archive_erasure.erase_org`). Both refuse a team still in the archive:
+with the gate shut nothing of the team's is being recorded while its rows are removed, which is
+what makes the job simple. No sweep, no pending state, no coordination with the recorder. What
+"the team's" means is decided by the governance domain (`teams.private_archive_key_ids`,
+`teams.erase_archive_rows`): every key under the team's own `org:`/`conn:` scopes, with its
+snapshots and the request shape the key row carries, plus every `ArchiveKeyOrg` mark of the
+team. A platform-key answer is a public question and stays; once the marks are gone nothing in
+the archive names the team. Objects go before rows, in batches of keys, in short transactions on
+the request pool with no connection held across object I/O (non-negotiable 3):
+`teams.archive_bodies_only_under` judges, in one anti-join, which content hashes no other key's
+snapshot shares (a body is content-addressed and deduplicated across keys), those objects are
+deleted through the store's one `delete` and forgotten by the in-process upload cache
+(`archive_bodies.forget`), and only then are the rows deleted. Another process's upload cache
+cannot be told, so the store is no longer append-only for anyone: `archive_bodies.prepare` trusts
+a remembered upload only after one `head` confirms the object is still there (bounded by
+`archive_r2_read_timeout_s`; a miss or an unanswered HEAD uploads again), so an identical answer
+recorded after an erasure never commits a pointer to bytes that are gone. A failed object delete stops the pass before the rows, so a retry starts from
+them; a deleted row would have left its object behind for good. The endpoint running totals move
+with the rows, taken from what each DELETE returned rather than from a count read beforehand, so
+two erasers on the same rows subtract once. One race is accepted and documented in the module:
+between judging a body an orphan and deleting it, another team can record the identical bytes;
+its snapshot then reads as "bytes not on file", which every reader tolerates as a miss.
+
+Deleting a team: the owner route sets the opt-out and commits it, calls `erase_org` once its
+request session has let go of its connection and before the cascade (a failure keeps the team,
+opted out, for a retry), then cascades. `cascade_delete_org` itself deletes the rows (the archive
+keys no foreign key at the team, so the cascade's FK-walking guard test never sees them), which
+keeps every other deletion path (admin force-delete, the sandbox reaper, the demo reset) from
+leaving rows behind, at the price of objects those paths do not clear. Out of scope,
+deliberately: the terminal evidence of async tasks (`treg://asynctasks/<call_id>`, settlement
+evidence under a public key with no team provenance), the `callrecord` audit trail and the
+idempotency replay store, which is the caller's own request and has its own window.
 
 ## Pricing a hit
 

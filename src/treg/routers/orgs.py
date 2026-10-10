@@ -15,6 +15,7 @@ from sqlmodel import select
 from .. import analytics, crypto, email as email_sender, health, localrun
 from .. import providers as _providers
 from ..application.onboard import demo as demo_seed
+from ..application import archive_erasure
 from ..application import signup as signup_use_cases
 from ..caller_metadata import TAG_DEFAULT, _MAX_BUDGET_DIMS, _META_KEY_RE, _client_of, _norm_client
 from ..config import get_settings
@@ -284,6 +285,7 @@ class OrgPatchIn(BaseModel):
 class OrgSettingsIn(BaseModel):
     daily_cap_micro: int | None = None
     platform_overflow: bool | None = None  # False = opt out of the overflow relay (ops/capacity.md)
+    archive: bool | None = None  # False = opt out of the archive (archive.md, "Opting out")
     budget_dims: list[str] | None = None
     primary_dim: str | None = None
 
@@ -892,6 +894,14 @@ async def delete_org(
     if confirm != org.slug:
         raise HTTPException(status_code=422, detail=(
             f"to delete this team, confirm with its slug: ?confirm={org.slug}"))
+    # The team's archived answers go with it (archive.md, "Opting out"). The opt-out is set and
+    # committed first, so nothing new of the team's is recorded from here on; the object phase
+    # then runs on its own short sessions after this one has let go of its connection, and a
+    # failure there keeps the team (opted out), so the owner simply tries again.
+    if org.archive_opt_out_at is None:
+        org.archive_opt_out_at = _utcnow_naive()
+    await db.commit()
+    await archive_erasure.erase_org(org_id)
     await teams.cascade_delete_org(org, db)
     await db.commit()
     return {"deleted_org": org_id}
@@ -1351,6 +1361,9 @@ async def get_org_settings(
             "daily_cap_set_by_team": int(org.daily_cap_micro or 0) or None,
             "platform_default_micro": get_settings().platform_daily_cap_micro,  # 0 = none
             "platform_overflow": not org.platform_overflow_disabled,
+            # The archive opt-out (archive.md, "Opting out"): the moment the team objected, or None.
+            "archive": org.archive_opt_out_at is None,
+            "archive_opt_out_at": org.archive_opt_out_at.isoformat() if org.archive_opt_out_at else None,
             "budget_dims": _budget_dims_of(org), "primary_dim": _primary_dim_of(caller)}
 
 
@@ -1374,6 +1387,11 @@ async def set_org_settings(
         org.daily_cap_micro = body.daily_cap_micro
     if "platform_overflow" in sent and body.platform_overflow is not None:
         org.platform_overflow_disabled = not body.platform_overflow
+    if "archive" in sent and body.archive is not None:
+        if not body.archive and org.archive_opt_out_at is None:
+            org.archive_opt_out_at = _utcnow_naive()   # the moment of objection is the record
+        elif body.archive:
+            org.archive_opt_out_at = None
     if "budget_dims" in sent and body.budget_dims is not None:
         dims = [d.strip().lower() for d in body.budget_dims if d and d.strip()]
         if len(dims) > _MAX_BUDGET_DIMS:

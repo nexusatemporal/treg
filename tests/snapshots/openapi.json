@@ -802,6 +802,17 @@
       },
       "OrgSettingsIn": {
         "properties": {
+          "archive": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive"
+          },
           "budget_dims": {
             "anyOf": [
               {

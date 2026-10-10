@@ -1226,12 +1226,20 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
             # run below unchanged — a cached hit is billed exactly like the live call it stands in
             # for, tagged `cached`; the founder's deferred pricing decision attaches to that tag.
             served = None
+            # A team that opted out of the archive (archive.md, "Opting out") is never answered
+            # from it and never recorded into it, on any tier: no lookup, no record, and so no
+            # key hash reaches the settle to mark the team against the question. Read off the
+            # org row the caller already carries - no query on the call path.
+            archive_opted_out = caller.org.archive_opt_out_at is not None
+            if archive_opted_out:
+                cache_diagnostics["cache_outcome"] = "org_opt_out"
             # An own-key catalog call (tier 1/2, never metered) takes part in the archive too:
             # it may be answered from a stored answer (free — the team's key is never billed)
             # and its own answer is recorded for the team, provided the question is fully
             # known (a streamed caller body was never read and cannot key).
             own_key_cacheable = (
-                mk is not None and not mk.metered and mk.tier in ("tool", "credential")
+                mk is not None and not archive_opted_out
+                and not mk.metered and mk.tier in ("tool", "credential")
                 and not mk.free_owned_poll and (caller_body_read or not request.has_body))
             own_key_archivable = (
                 own_key_cacheable and archive.recording()
@@ -1250,6 +1258,7 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                     catalog_store.load().by_id.get(mk.endpoint_id), own_credential=own_credential)
             # A probe must reach the vendor: an archived answer proves nothing about capacity.
             if (mk is not None and mk.probe_lock_id is None and archive.serving()
+                    and not archive_opted_out
                     and ((mk.metered and not mk.streamable_free_result) or own_key_cacheable)):
                 lookup_started = time.monotonic()
                 try:
@@ -1343,7 +1352,8 @@ async def _execute_call(request: _ApplicationRequest, upstream_client: httpx.Asy
                 # 2xx only — gate 3 of eligibility is exactly 'this fact, at this line'. Off unless
                 # TREG_ARCHIVE_MODE says otherwise; record() is fire-and-forget and never raises.
                 # `own_credential` here means billed OAuth: the org's token, treg's bill.
-                if (mk.metered and archive.recording() and 200 <= response.status < 300
+                if (mk.metered and archive.recording() and not archive_opted_out
+                        and 200 <= response.status < 300
                         and spooled_bytes is None and not _unfinished_submission(mk, body)
                         and not (own_credential and _echoes_own_credential(tool, secrets, body))
                         and not _account_out_2xx(mk, response, body)):

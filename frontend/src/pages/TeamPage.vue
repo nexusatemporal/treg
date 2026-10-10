@@ -508,6 +508,29 @@ export default {
                   </p>
                 </div>
 
+                <!-- THE ARCHIVE. A team-level privacy setting (docs/context/architecture/archive.md,
+                     "Opting out"): off means no call is answered from or recorded into treg's archive.
+                     Erasing what was stored is a separate act (team deletion, or on request). -->
+                <div v-if="capCfg" style="margin-top:22px;border-top:1px solid var(--line);padding-top:14px">
+                  <span class="lbl" style="margin:0">Archive</span>
+                  <p class="sub" style="margin:4px 0 8px;font-size:12px">
+                    treg keeps answers to the exact questions your agents ask so a repeat can be served
+                    from storage: free on your own keys, at a reduced price on treg's. Turn it off and
+                    new calls skip that storage both ways: none is answered from it (so no repeat
+                    discount on treg's keys; your own keys stay free as always) and none is stored.
+                    Answers already stored are erased when the team is deleted, or on request through
+                    support. Call records and async-task completion evidence are kept as before.
+                  </p>
+                  <div class="field" style="max-width:560px;align-items:center">
+                    <label class="tgl" :title="!canAdmin?'only a team admin can change this':(capCfg.archive?'archive on — click to opt out':'archive off — click to opt back in')">
+                      <input type="checkbox" :checked="capCfg.archive" :disabled="archiveBusy || !canAdmin" @change="setArchive($event.target.checked)"/>
+                      <span>{{capCfg.archive?'on':'off'}}</span>
+                    </label>
+                    <span v-if="!canAdmin" class="sub" style="margin:0">admins change this</span>
+                  </div>
+                  <p v-if="archiveErr" class="banner" style="margin:10px 0 0">{{archiveErr}}</p>
+                </div>
+
                 <!-- PER-TAG BUDGETS. What a team reselling treg sets on ITS OWN customers. Only
                      DECLARED dimensions are enforced on the call path, so the key is a picker over
                      those rather than a free-text box — the API refuses a limit on anything else

@@ -154,6 +154,7 @@ class OrgSnapshot:
     autotopup_monthly_cap_micro: int
     first_call_at: Any
     autotopup_max_per_hour: int = 0
+    archive_opt_out_at: Any = None   # set = the team opted out of the archive (archive.md)
 
 
 @dataclass(frozen=True)
@@ -213,6 +214,7 @@ class CallerSnapshot:
                 autotopup_amount_micro=org.autotopup_amount_micro,
                 autotopup_monthly_cap_micro=org.autotopup_monthly_cap_micro,
                 autotopup_max_per_hour=int(getattr(org, 'autotopup_max_per_hour', 0) or 0),
+                archive_opt_out_at=getattr(org, 'archive_opt_out_at', None),
                 first_call_at=org.first_call_at,
             ),
             api_key_id=key.id if key else None,
