@@ -21,6 +21,10 @@ only while what was already charged plus its catalog estimate fits under it.
 checked by `treg.people.email.verify`). It is its own linked child `:v` with its own hold and
 verdict, reported in `_treg.verification`; the find's answer is not altered.
 
+When the caller sent a domain and the hit carries an email, `_treg.domain_match` (and
+`X-Treg-Domain-Match`) says whether the mailbox domain matches. A LinkedIn-only child that returns
+a former employer still counts as a hit and is billed; the flag discloses the mismatch.
+
 `X-Treg-Route-Confirm` makes a hit count only once a second provider returns the same value of the
 contract's `confirm` field: the waterfall goes on after an unconfirmed hit, each attempt at its own
 price. The first provider's answer is returned either way, reported in `_treg.confirmation`; when
@@ -207,6 +211,31 @@ def _other_subject(contract, identity: dict, core: dict) -> str | None:
             if _subject(k, core[k]) != _subject(k, identity[k]):
                 return _subject(k, core[k])
     return None
+
+
+_DOMAIN_IDENTITY_KEYS = ("domain", "company_domain", "website")
+
+
+def _email_domain_match(identity: dict, output: dict | None) -> bool | None:
+    """True/False when the caller named a domain and the hit carries an email; else None.
+
+    Same comparison call-events uses for `answer_flags.domain_match`. Disclose on `_treg` and
+    `X-Treg-Domain-Match`; never alter the child's answer. A LinkedIn-only child often returns a
+    former employer when the caller also sent a domain.
+    """
+    if not output:
+        return None
+    email = output.get("email")
+    if not isinstance(email, str) or "@" not in email:
+        return None
+    asked = next((identity[k] for k in _DOMAIN_IDENTITY_KEYS if identity.get(k) not in (None, "")), None)
+    if asked in (None, ""):
+        return None
+    asked_host = P.host(asked)
+    got_host = P.host(email.rsplit("@", 1)[1])
+    if not asked_host or not got_host:
+        return None
+    return got_host == asked_host
 
 
 def _miss_status(endpoint: dict) -> int | None:
@@ -1094,6 +1123,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
     # suggestion only, unless the caller sent `X-Treg-Route-Verify`: then the check runs below.
     advice = (plan.contract.advice_unverified
               if plan.contract.advice_unverified and output and output.get("verified") is not True else "")
+    advice_locked = False  # a check's disagree/skip advice wins over domain-mismatch advice
     verification = None
     check = plan.contract.check
     if options.verify and check is not None and winner_outcome in ("hit", "weak"):
@@ -1108,10 +1138,18 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
             if (check.disagree_advice and output.get("verified") is True and not verification.get("pending")
                     and verification["verdict"] != "valid"):
                 advice = check.disagree_advice   # the check wins; say so where the claim is read
+                advice_locked = True
         elif check.skip_advice and verification["reason"] == check.skip_reason:
             advice = check.skip_advice   # the caller asked; say why this hit was not checked
+            advice_locked = True
     elif options.verify:
         verification = _unchecked("no_hit")   # a miss is never checked; say why
+    # Disclose whether the hit's mailbox domain matches the domain the caller sent. Never alter
+    # the answer: a LinkedIn-only child that returns a former employer is still a billed hit.
+    domain_match = (_email_domain_match(plan.identity, output)
+                    if winner_outcome in ("hit", "weak") else None)
+    if (domain_match is False and plan.contract.advice_domain_mismatch and not advice_locked):
+        advice = plan.contract.advice_domain_mismatch
     confirmation = ({"field": plan.contract.confirm, "confirmed": confirmed_by is not None, "confirmed_by": confirmed_by}
                     if options.confirm and winner_outcome in ("hit", "weak") else None)
     decision = ({"decided": decided_by is not None, "decided_by": decided_by,
@@ -1121,6 +1159,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
                 "_treg": {"served_by": served, "provider": provider, "tier": cand.tier,
                           **({"merged_from": merged_from} if merged_from else {}),
                           **({"advice": advice} if advice else {}),
+                          **({"domain_match": domain_match} if domain_match is not None else {}),
                           "outcome": winner_outcome, "tried": [t.view() for t in tried], "charged_micro": spent,
                           **({"verification": verification} if verification is not None else {}),
                           **({"confirmation": confirmation} if confirmation is not None else {}),
@@ -1138,6 +1177,7 @@ async def _run_routed(parent: CallContext, ep: dict, body_bytes: bytes, get_head
     return _json(body_out, 200, {"X-Treg-Served-By": served, "X-Treg-Providers-Tried": ",".join(t.provider for t in tried),
                                  **({"X-Treg-Merged-From": ",".join(merged_from)} if merged_from else {}),
                                  **({"X-Treg-Ignored-Filters": ",".join(cand.ignored)} if cand.ignored else {}),
+                                 **({"X-Treg-Domain-Match": str(domain_match).lower()} if domain_match is not None else {}),
                                  **({"X-Treg-Route-Capped": "true"} if cost_capped else {}),
                                  **({"X-Treg-Route-Confirmed": str(confirmation["confirmed"]).lower()} if confirmation else {}),
                                  **({"X-Treg-Route-Decided": str(decision["decided"]).lower()} if decision else {}),

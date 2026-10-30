@@ -120,6 +120,9 @@ How a routed call works:
 - A filter the serving provider could not apply is named in `X-Treg-Ignored-Filters` and
   `_treg.ignored_filters`: filter the rows yourself, or send `X-Treg-Route-Strict-Filters: 1` to be
   refused with an unbilled 422 instead.
+- When you sent a `domain` on an email find, `_treg.domain_match` (and `X-Treg-Domain-Match`) says
+  whether the hit's mailbox domain matches it. A LinkedIn-only provider often returns a former
+  employer; the hit is still billed — read the flag before treating the address as current.
 - An asynchronous provider is polled for up to 60 seconds. If it is still running you get HTTP 202
   with `_treg.outcome: pending`, its poll descriptor, `reserved_micro` and `charged_micro: null`. Do
   not retry or start another provider: the task may still finish and charge.

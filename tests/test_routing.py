@@ -616,6 +616,51 @@ async def test_an_unverified_hit_carries_verify_advice(clients: AsyncClient, enr
     assert before - await _balance(clients) == int(r.headers["X-Treg-Cost-Micro"]) == 8_900, "the find, nothing chained"
 
 
+async def test_off_domain_hit_sets_domain_match_false(clients: AsyncClient, enrichment_on, monkeypatch):
+    """When the caller sent a domain and the child returns an address at another host (a LinkedIn-
+    only finder returning a former employer), the hit is still billed and the address is unchanged,
+    but `_treg.domain_match` / `X-Treg-Domain-Match` disclose the mismatch and advice names it."""
+    monkeypatch.setattr(call_service, "relay", _relay_by_provider(
+        {"tomba": [(200, {"data": {"email": "alan@othercorp.example", "score": 90,
+                                    "verification": {"status": "valid"}}})]}, []))
+    before = await _balance(clients)
+    r = await clients.post(f"/call/{ROUTED}", json={"full_name": "Alan Marquez", "domain": "pruittstructures.com"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["output"]["email"] == "alan@othercorp.example", "the child's answer is not rewritten"
+    assert d["_treg"]["outcome"] == "hit" and d["_treg"]["domain_match"] is False
+    assert r.headers["X-Treg-Domain-Match"] == "false"
+    assert "domain_match" in d["_treg"]["advice"] and "different domain" in d["_treg"]["advice"]
+    assert before - await _balance(clients) == int(r.headers["X-Treg-Cost-Micro"]) == 8_900
+
+
+async def test_matching_domain_hit_sets_domain_match_true(clients: AsyncClient, enrichment_on, monkeypatch):
+    """A hit whose mailbox host equals the domain the caller sent reports domain_match true; the
+    unverified advice still attaches when the provider did not vouch for deliverability."""
+    monkeypatch.setattr(call_service, "relay", _relay_by_provider(
+        {"tomba": [(200, {"data": {"email": "alan@pruittstructures.com", "score": 96,
+                                    "verification": {"status": "accept_all"}}})]}, []))
+    r = await clients.post(f"/call/{ROUTED}", json={"full_name": "Alan Marquez", "domain": "pruittstructures.com"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["_treg"]["domain_match"] is True and r.headers["X-Treg-Domain-Match"] == "true"
+    assert "treg.people.email.verify" in d["_treg"]["advice"], "match does not suppress unverified advice"
+
+
+async def test_linkedin_only_find_omits_domain_match(clients: AsyncClient, enrichment_on, monkeypatch):
+    """No domain in the request means no domain_match field — there is nothing to compare."""
+    monkeypatch.setattr(call_service, "relay", _relay_by_provider(
+        {"findymail": [(200, {"contact": {"name": "Patrick Collison",
+                                           "email": "patrick@stripe.com"}})],
+         "*": [(404, {})] * 8}, []))
+    r = await clients.post(f"/call/{ROUTED}",
+                           json={"linkedin_url": "https://www.linkedin.com/in/patrickcollison"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["output"]["email"] == "patrick@stripe.com"
+    assert "domain_match" not in d["_treg"] and "X-Treg-Domain-Match" not in r.headers
+
+
 async def test_a_people_search_hit_always_carries_verify_advice(clients: AsyncClient, enrichment_on, monkeypatch):
     """Search rows are directory listings: a row's email is found, not confirmed deliverable. The
     contract has no `verified` output, so the advice attaches to every hit — Hunter domain-search
