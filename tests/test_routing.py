@@ -923,6 +923,40 @@ async def test_a_400_after_another_provider_answered_is_that_providers_own_rejec
     assert before - await _balance(clients) == 8_900 == int(r.headers["X-Treg-Cost-Micro"])
 
 
+def test_tomba_linkedin_free_mail_is_a_miss_for_work_email():
+    """Work-email find must not treat a free-mail mailbox as a hit.
+
+    Tomba's LinkedIn finder often returns gmail/yahoo/hotmail and marks them `type: personal`.
+    In Tomba's vocabulary that means nominative (vs role/generic) — the stripe.com fixture also
+    has type personal — so the miss rule keys off the mailbox host via email_domain(), not type.
+    """
+    ad = catalog_store.load().adapters["tomba.people.email.find.linkedin"]
+    work = {"data": {"email": "patrick@stripe.com", "type": "personal", "score": 100,
+                     "first_name": "Patrick", "last_name": "Collison",
+                     "verification": {"status": "valid"}}}
+    free = {"data": {"email": "someone@yahoo.com", "type": "personal", "score": 90,
+                     "first_name": "Sam", "last_name": "Example",
+                     "verification": {"status": "valid"}}}
+    assert not ad.is_miss(work)
+    assert ad.from_upstream(work)["email"] == "patrick@stripe.com"
+    assert ad.is_miss(free)
+    assert ad.is_miss({"data": {"email": None}})
+    assert ad.is_miss({"data": {"email": "a@gmail.com"}})
+    assert ad.is_miss({"data": {"email": "a@hotmail.com"}})
+    # a company mailbox stays a hit even when Tomba labels type personal
+    assert not ad.is_miss({"data": {"email": "ceo@acme.example", "type": "personal"}})
+    from test_marketplace_call import _mk
+    from treg.application.call import settle as A
+    free_body = b'{"data": {"email": "someone@yahoo.com", "type": "personal", "score": 90}}'
+    assert A._observed_cost_micro(
+        _mk("tomba", endpoint_id="tomba.people.email.find.linkedin", cost_type="per_success"),
+        free_body) == 0
+    work_body = b'{"data": {"email": "patrick@stripe.com", "type": "personal", "score": 100}}'
+    assert A._observed_cost_micro(
+        _mk("tomba", endpoint_id="tomba.people.email.find.linkedin", cost_type="per_success"),
+        work_body) is None, "a company-domain hit still settles at the estimate"
+
+
 def test_a_per_success_miss_settles_at_zero_when_the_adapter_can_tell():
     """Live 2026-08-28: the first waterfall charged tomba, findymail and leadsforge for misses the
     catalog calls free. The adapter's `miss` predicate is the missing knowledge."""
