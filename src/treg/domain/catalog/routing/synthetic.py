@@ -67,7 +67,8 @@ def routed_endpoint(contract: Contract, children: list[dict], adapters: dict[str
                            + (f" and fills {', '.join(sorted(contract.derive))} from the rest" if contract.derive else "")
                            + ". On a miss it tries the next provider, cheapest first. Options are "
                            "X-Treg-Route-* headers, never body fields. The answer is {output, raw, _treg}; "
-                           "X-Treg-Served-By names the provider."
+                           "X-Treg-Served-By names the provider. When you sent a domain, _treg.domain_match "
+                           "says whether the hit's mailbox domain matches it."
                            + (f" X-Treg-Route-Verify: true also checks a hit with {contract.check.endpoint}, "
                               "at that call's own price, in _treg.verification." if contract.check else "")
                            + (f" X-Treg-Route-Confirm: true counts a hit only once a second provider returns the same "

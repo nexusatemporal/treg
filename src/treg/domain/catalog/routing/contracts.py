@@ -47,6 +47,11 @@ class Contract:
     # set there attaches to EVERY hit — deliberate for `people.search`, whose rows carry emails
     # nobody vouched for. A suggestion only unless the caller asks for the check (`check`, below).
     advice_unverified: str = ""
+    # One sentence the router attaches as `_treg.advice` when a hit's email domain does not match
+    # the domain the caller asked for (`_treg.domain_match: false`). Disclose only — the answer is
+    # not altered. Empty = flag only, no advice. A LinkedIn-only child often returns a former
+    # employer when the caller also sent a domain.
+    advice_domain_mismatch: str = ""
     # False = the contract exists so the archive can judge found/empty (`results.has_result_rules`
     # needs a verified adapter, and an adapter verifies only against a contract); no
     # `treg.<capability>` row is ever generated from it, however many children verify. Used where
@@ -232,6 +237,7 @@ def parse_contracts(doc: dict) -> dict[str, Contract]:
             miss=str(c.get("miss") or ""), idempotent=bool(c.get("idempotent", True)),
             default_max_cost_usd=(float(c["default_max_cost_usd"]) if c.get("default_max_cost_usd") is not None else None),
             advice_unverified=str(c.get("advice_unverified") or ""),
+            advice_domain_mismatch=str(c.get("advice_domain_mismatch") or ""),
             routed=bool(c.get("routed", True)),
             scoping=tuple(str(k) for k in scoping),
             prefer=tuple(str(p).lower() for p in c.get("prefer") or ()),

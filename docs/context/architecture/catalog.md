@@ -2497,6 +2497,14 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   qualified/query −0.53 ([−1.84, +0.77]) — and ahead of the published Lessie 68.2, Exa 64.7 and
   Claude Code 50.5. The remaining differences are agent-side, not routing: the hand-written policy
   post-filtered rows on location and over-fetched (`size: 20`, trimmed to 15).
+- **Domain match on email finds (2026-10-31)**: when the caller sent a `domain` (or
+  `company_domain` / `website`) and the hit carries an `email`, `_treg.domain_match` and
+  `X-Treg-Domain-Match` say whether the mailbox host matches that domain — the same comparison
+  call-events already stores as `answer_flags.domain_match`. A LinkedIn-only child that returns a
+  former employer still counts as a hit and is billed; the flag discloses the mismatch and, when
+  the contract sets `advice_domain_mismatch`, `_treg.advice` names it (unless a Route-Verify check
+  already spoke). The child's `output` and `raw` are not altered.
+
 - **The answer says what it ignored (2026-08-29)**: `ignored_filters` was on `_treg.tried[]` only,
   which no caller reads. It is now also on `_treg` itself for the child that served and on an
   `X-Treg-Ignored-Filters` response header, so an agent can post-filter, or say why the rows are
