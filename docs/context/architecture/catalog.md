@@ -2509,14 +2509,6 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   hit; a miss free, a matched-but-no-number profile the 1-credit search, all settled from
   `billing.creditsCharged`). Added for LatAm coverage after a Guatemala test found 7 in 44 across
   the other five. Apollo cannot join: its phone reveal is webhook-only, never inline.
-- **Work-email free-mail is a miss (2026-10-31)**: `people.email.find` is the work-email
-  contract; `people.email.find.personal` is separate. Several providers already pin work-only at
-  request time (`email_type: work`, `accept_personal: false`, `getPersonalEmails: false`). Tomba's
-  LinkedIn finder cannot: it often returns gmail/yahoo/hotmail and labels them `type: personal`,
-  which in Tomba's vocabulary means nominative vs role/generic (the stripe.com fixture is also
-  `type: personal`). Its adapter miss is `email_domain(data.email) == null` — null for free-mail
-  hosts and for a missing address — so a free-mail answer continues the waterfall and settles at
-  zero on this per_success child instead of counting as a billed work-email hit.
 - **people.\* sweep (2026-08-29)**: people.search 6 → 16 children (aviato dsl/simple, companyenrich
   scroll, crustdata, fiber-ai, leadsforge, leadmagic search + role-finder, findymail employees +
   domain — the last retagged from email.find, it returns a list), people.enrich 9 → 14 (aviato bulk,
