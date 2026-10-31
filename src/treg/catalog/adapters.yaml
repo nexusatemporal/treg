@@ -1120,6 +1120,12 @@ adapters:
     out: {name: "organizations[0].attributes.name", domain: "organizations[0].attributes.url",
           employees: "organizations[0].attributes.employee_count", industry: "organizations[0].attributes.industry"}
     miss: "matched_count == 0"
+  crawl4ai.companies.enrich:
+    accepts: [[domain]]
+    in:  {domain: queryParams.domain}
+    out: {name: data.name, domain: data.domain, description: data.description, industry: data.industry,
+          employees: data.people_count, linkedin_url: "fmt('https://www.linkedin.com/company/{}', data.linkedin)"}
+    miss: "data == null"
   hunter.companies.enrich:
     accepts: [[domain]]
     in:  {domain: queryParams.domain}
@@ -2698,6 +2704,16 @@ adapters:
       body.per_page: limit
     out: {people: people, count: total_entries}
     miss: "coalesce(people, []) == []"
+  crawl4ai.people.search:
+    accepts: [[title, company_domain], [company_domain]]
+    in: {company_domain: body.where.company.domain}
+    in_expr:
+      body.where.person.seniority: "role_seniority(title)"
+      body.where.person.department: "role_department(title)"
+      body.limit: limit
+    max: {limit: 100}
+    out: {people: data, count: "len(data)"}
+    miss: "coalesce(data, []) == []"
   quickenrich.people.search:
     accepts: [[title, company_domain], [company_domain], [title]]
     in: {company_domain: body.company_url.include, title: body.title.include}
