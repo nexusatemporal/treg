@@ -2998,6 +2998,10 @@ CRAWL4AI = OAuthProvider(
     base_url="https://api.crawl4ai.com",
     docs_url="https://api.crawl4ai.com/docs",
     probe_path="/v1/billing/balance",  # free: reads the credit balance, spends nothing
+    catalog_targets=(
+        # Lead (company and people search) answers from its own gate; the same key, same Bearer header.
+        CatalogTarget(host="gate.crawl4ai.com", base_url="https://gate.crawl4ai.com"),
+    ),
 )
 
 SPIDERCLOUD = OAuthProvider(

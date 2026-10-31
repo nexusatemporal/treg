@@ -19,7 +19,9 @@ only while what was already charged plus its catalog estimate fits under it.
 
 `X-Treg-Route-Verify` asks for one more call after a hit, the contract's `check` (an email find
 checked by `treg.people.email.verify`). It is its own linked child `:v` with its own hold and
-verdict, reported in `_treg.verification`; the find's answer is not altered.
+verdict, reported in `_treg.verification`; the find's answer is not altered. A check still pending
+after the routed async wait keeps `pending: true`, its `call_id`, and the child's `async` poll
+descriptor (`task_id` + poll endpoint) so the caller can resume; `cost_micro` is then the hold.
 
 `X-Treg-Route-Confirm` makes a hit count only once a second provider returns the same value of the
 contract's `confirm` field: the waterfall goes on after an unconfirmed hit, each attempt at its own
@@ -1204,9 +1206,14 @@ async def _run_check(parent: CallContext, check, output: dict, remaining: int | 
         if response.status == 202 and meta.get("outcome") == "pending":
             # Still running after the routed wait (BounceBan `verifying`): its hold stays with the
             # async worker, which settles or releases it; nothing of it is charged now.
-            return {"verdict": "unknown", "checked": True, "served_by": meta.get("served_by"),
+            # Forward the child's async poll descriptor so the caller can resume without digging
+            # through GET /calls/{call_id}; cost_micro is the hold (reserved), not a settled charge.
+            view = {"verdict": "unknown", "checked": True, "served_by": meta.get("served_by"),
                     "cost_micro": int(meta.get("reserved_micro") or 0), "pending": True,
-                    "call_id": meta.get("call_ref")}, 0
+                    "call_id": meta.get("call_ref")}
+            if isinstance(meta.get("async"), dict):
+                view["async"] = meta["async"]
+            return view, 0
         cost = int(_header(response, "X-Treg-Cost-Micro") or 0)
         served = meta.get("served_by")
         if not 200 <= response.status < 300 or meta.get("outcome") not in ("hit", "weak", "miss"):

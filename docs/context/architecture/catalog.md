@@ -2201,7 +2201,9 @@ to choose (`docs/CAPABILITY-ROUTING-PLAN.md`). Everything else in the catalog st
   (`no_hit` when the find missed, which is never checked).
   Its `verdict` is `results.verdict` on the serving child, the same word `CallRecord.verdict`
   stores. `X-Treg-Cost-Micro` and `_treg.charged_micro` are find plus check; a check still pending
-  after the routed async wait reports its hold and `pending: true`, settled later by the worker. A
+  after the routed async wait reports its hold as `cost_micro`, `pending: true`, the check child's
+  `call_id`, and that child's `async` poll descriptor (`task_id` + poll endpoint), settled later by
+  the worker (`GET /calls/{call_id}` shows the settle). A
   hit's advice is dropped once a check ran, with one exception: the check wins over the finder's
   own claim. A completed (not pending) verdict other than `valid` on a `verified: true` hit
   attaches the check's `disagree_advice` instead (both email finds), so an agent reading

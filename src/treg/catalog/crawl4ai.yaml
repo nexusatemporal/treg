@@ -1976,8 +1976,10 @@ endpoints:
     summary: 'The reviews Google Maps shows for one place, one row per review: stars, text, date, the reviewer, likes,
       the owner''s reply and the review''s own link. `place` is the place''s Google Maps link, its place id (ChIJ...)
       or its cid (the number in a maps?cid= link); `sort` is relevant (Google''s order) or newest; `limit` how many
-      reviews (default 5, up to 100), one price a call at any limit. About 1 to 3 s for a few reviews, 8 to 16 s for
-      100. A reply with fewer than asked and meta.partial true gives the rest when retried a little later. Columns:
+      reviews (default 5, up to 100), one price a call at any limit. Up to 8 reviews come from one page in 1 to 3 s;
+      more reads further pages, which Google paces (8 to 16 s for 100, longer when many callers read reviews at once),
+      so ask for 8 or fewer unless you need more. A reply with fewer than asked and meta.partial true gives the rest
+      when retried a little later. Columns:
       review_id, place_id, rating, text, date, author, likes, owner_reply, url.'
     body_allowlist: true
     input:
@@ -5143,3 +5145,95 @@ endpoints:
     example_response: examples/crawl4ai.zillow.property.detail.json
     added: '2026-10-11'
   # <<< recipes
+  # >>> lead: Crawl4AI Lead (company and people search) answers from gate.crawl4ai.com, the same key
+  - id: crawl4ai.companies.enrich
+    async: false
+    capability: companies.enrich
+    platform: companies
+    scope: any_account
+    method: GET
+    host: gate.crawl4ai.com
+    path: /lead/company
+    name: A company by its domain
+    summary: 'One company from its domain, as Crawl4AI Lead knows it: name, description, industry, LinkedIn slug,
+      logo, the e-mails and phones published on its pages, its social links, the technology it runs, its mail provider
+      and how many of its people Lead holds. `domain` is the company''s site (stripe.com). A domain Lead does not have
+      answers 404, free. About 0.2 s.'
+    input:
+      queryParams:
+        domain:
+          type: string
+          required: true
+          example: stripe.com
+    strict_query: true
+    cost:
+      type: per_success
+      value: 0.5
+      currency: credit
+      per: 1
+      unit: call
+      source: observed
+      source_url: https://api.crawl4ai.com/v1/prices
+      checked: '2026-10-31'
+      confidence: verified
+      note: 'treg''s account price: 0.5 credits per company found; a 404 (Lead has no such company) is free.
+        The x-c4-cost header settles the actual charge.'
+    miss:
+      status: 404
+      means: "Lead has no record of this domain — a normal outcome, and free"
+    docs_url: https://crawl4ai.com/llms.txt
+    test_request:
+      queryParams:
+        domain: stripe.com
+    verified: '2026-10-31'
+    example_response: examples/crawl4ai.companies.enrich.json
+    added: '2026-10-31'
+  - id: crawl4ai.people.search
+    async: false
+    capability: people.search
+    platform: people
+    scope: any_account
+    method: POST
+    host: gate.crawl4ai.com
+    path: /lead/people/search
+    name: People at a company
+    summary: 'The people Crawl4AI Lead holds at a company, one row per person: name, title, LinkedIn slug, the
+      page they were found on, an e-mail when one is published (with its kind and status), the department and
+      decision role Lead read from the title, and the company''s facts. `where.company.domain` is the company''s site;
+      `where.person.department` and `where.person.seniority` narrow by role (department: marketing, sales,
+      engineering, product, finance, hr, operations, legal, it, design, executive; seniority: owner_founder, c_level,
+      vp, director, manager); `limit` is how many people (default 10, up to 100), one price a call at any limit.
+      An empty answer is free. About 0.2 s.'
+    body_allowlist: true
+    input:
+      bodyType: json
+      body:
+        where:
+          type: object
+          required: true
+          example: {company: {domain: stripe.com}, person: {department: [engineering]}}
+        limit:
+          type: integer
+          required: false
+          note: default 10, up to 100
+    cost:
+      type: per_success
+      value: 0.5
+      currency: credit
+      per: 1
+      unit: call
+      source: observed
+      source_url: https://api.crawl4ai.com/v1/prices
+      checked: '2026-10-31'
+      confidence: verified
+      note: 'treg''s account price: 0.5 credits per answer with at least one person, whatever the limit; an empty
+        answer is free. The x-c4-cost header settles the actual charge.'
+    docs_url: https://crawl4ai.com/llms.txt
+    test_request:
+      body:
+        where: {company: {domain: stripe.com}}
+        limit: 3
+    verified: '2026-10-31'
+    example_response: examples/crawl4ai.people.search.json
+    added: '2026-10-31'
+  # <<< lead

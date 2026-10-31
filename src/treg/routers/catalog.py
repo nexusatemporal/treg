@@ -705,7 +705,10 @@ async def catalog_endpoint(
                         "X-Treg-Route-Strict-Filters": "1 = never call a provider that cannot apply a filter you sent (answers 422, nothing charged); off by default — the answer names what was ignored in X-Treg-Ignored-Filters",
                         **({"X-Treg-Route-Verify": f"true = check a hit with {contract.check.endpoint} in the same call, at its own price, "
                                                    "inside X-Treg-Route-Max-Cost; the answer is _treg.verification "
-                                                   "{verdict, checked, served_by, cost_micro}"} if contract and contract.check else {}),
+                                                   "{verdict, checked, served_by, cost_micro}; when the check is still "
+                                                   "running also pending, call_id and async (task_id + poll) — "
+                                                   "cost_micro is then a hold settled later (GET /calls/{{call_id}})"}
+                           if contract and contract.check else {}),
                         **({"X-Treg-Route-Confirm": f"true = a hit counts only once a second provider returns the same {contract.confirm}; "
                                                     "each attempt at its own price, inside X-Treg-Route-Max-Cost; the answer is "
                                                     "_treg.confirmation {field, confirmed, confirmed_by}"} if contract and contract.confirm else {}),
